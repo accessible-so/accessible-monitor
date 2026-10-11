@@ -9,9 +9,12 @@
  */
 import { countElements, splitIntoChunks } from './chunks';
 import type { Chunk } from './chunks';
-import { DOCUMENT_COST_PARTS, DOCUMENT_COST_RULES, resolveNodeElement, runChunk, runDocumentCost, runPage } from './axe-runner';
+import { DOCUMENT_COST_PARTS, resolveNodeElement, runChunk, runDocumentCost, runPage } from './axe-runner';
 import type { AxeLike, AxeNodeLike, AxeViolationLike } from './axe-runner';
 import type { SchedulerApi } from './scheduler';
+import { INITIAL_RATIOS, pageTier, predictPartMs } from './tier';
+import type { DocCostPartName } from './tier';
+import type { PageTier } from '../protocol/types';
 
 export interface EngineOptions {
   doc: Document;
@@ -23,32 +26,26 @@ export interface EngineOptions {
   /** Clock for the budget measurement; defaults to `performance.now()`. */
   now?: () => number;
   /**
-   * Largest document, in elements, on which the document-cost rules
-   * (`color-contrast` and friends) are worth running at all. Up to it the pass
-   * waits until the tab is hidden, where its task costs nobody an interaction;
-   * above it the rules are skipped and named in `perf.skipped`: one run costs
-   * over a second on a 5,000-element page and there is nothing to chunk.
+   * Largest document on which the document-cost parts still run at tab-hide.
+   * Above it they run only in an idle window whose prediction fits, and are
+   * dropped (`perf.skipped`) at drain.
    */
   contrastDeferMaxElements?: number;
+  /** Run the page's first `axe.run` only in an idle window (the session already knows this device is slow). */
+  firstRunInWindow?: boolean;
+  onTier?: (tier: PageTier) => void;
 }
 
 export interface EngineApi {
   scanFull(): void;
   /** The once-per-page document-cost pass; also re-run after a client-side route change. */
   scanDocumentCost(): void;
-  /** True while the document-cost pass is waiting for the tab to hide. */
+  /** True while a document-cost part that would run at drain is still pending. */
   hasDeferredDocumentCost(): boolean;
-  /**
-   * Run the deferred pass now, outside the idle queue, and resolve once its
-   * findings are recorded. The caller is the teardown path: there is no idle
-   * callback left to wait for.
-   */
-  runDeferredDocumentCost(): Promise<void>;
-  /**
-   * Give up on the deferred pass and record its rules as not run. Returns true
-   * if there was one to give up on.
-   */
+  /** Give up on every pending part and report its rules as skipped. True if there was one. */
   abandonDeferredDocumentCost(): boolean;
+  /** Predicted cost of a document-cost part, from the first run and what parts have actually cost. */
+  predictedPartMs(part: DocCostPartName): number | null;
   scanRoots(roots: Element[]): void;
   stop(): void;
 }
@@ -67,8 +64,18 @@ export function Engine(opts: EngineOptions): EngineApi {
   let observer: IntersectionObserver | null = null;
   let stopped = false;
   let fullDone = false;
-  let deferredDocumentCost = false;
-  let deferredRunning = false;
+  let firstRunMs: number | null = null;
+  let lastChunkMs: number | null = null;
+  const ratios: Record<DocCostPartName, number> = { ...INITIAL_RATIOS };
+  /** Parts armed for the current view and not yet run, abandoned, or dropped. */
+  const pendingParts = new Set<DocCostPartName>();
+  /** Whether the current view's parts would run at drain ('first') or be dropped there. */
+  let partsAtDrain: 'first' | 'drop' = 'first';
+  /** Bumped on every re-arm, so a job queued for an earlier view does nothing. */
+  let docGen = 0;
+
+  const chunkPredict = (): number | null => lastChunkMs ?? firstRunMs;
+  const partPredict = (part: DocCostPartName): number | null => predictPartMs(firstRunMs, ratios[part]);
 
   function debug(...args: unknown[]): void {
     try { opts.debug?.(...args); } catch { /* logging never breaks a scan */ }
@@ -101,9 +108,10 @@ export function Engine(opts: EngineOptions): EngineApi {
     scheduler.schedule(async () => {
       if (stopped) return 0;
       const { violations, ms } = await runChunk(axe, chunk, opts.now);
+      lastChunkMs = ms;
       if (!stopped) report(violations);
       return ms;
-    }, elements);
+    }, elements, { predictMs: chunkPredict });
   }
 
   /** Split at run time, so a shrunken chunk budget applies to work not yet done. */
@@ -115,9 +123,10 @@ export function Engine(opts: EngineOptions): EngineApi {
       const first = chunks[0];
       if (!first) return 0;
       const { violations, ms } = await runChunk(axe, first, opts.now);
+      lastChunkMs = ms;
       if (!stopped) report(violations);
       return ms;
-    }, countElements(root) + 1);
+    }, countElements(root) + 1, { predictMs: chunkPredict });
   }
 
   function orderVisibleFirst(elements: Element[], done: (ordered: Element[]) => void): void {
@@ -150,73 +159,59 @@ export function Engine(opts: EngineOptions): EngineApi {
   }
 
   /**
-   * The document-cost rules, once, on the whole document — later, or never.
+   * Arm the document-cost parts for the current view.
    *
-   * The pass is one indivisible `axe.run` whose cost is the document's times
-   * the device's, so there is nothing to chunk:
-   *
-   * - up to `contrastDeferMax`: hold it until the tab is hidden, where nobody
-   *   is waiting on the main thread. It used to run immediately on pages under
-   *   250 elements, a threshold measured on a fast laptop — where such a page
-   *   costs ~22ms. At a mid-range phone's speed the same page costs ~76ms, over
-   *   budget while the visitor is looking, so no size is small enough to run it
-   *   then without knowing the device;
-   * - beyond that: do not run it, and name the rules in `perf.skipped` so a
-   *   large page reads as partly unchecked rather than as clean.
+   * Each part is its own window-only job, predicted as a multiple of the first
+   * run, and pending until it runs. At drain, a page up to `contrastDeferMax`
+   * runs what is still pending ('first'); a larger one drops it and reports the
+   * rules as skipped. In a window even a large page's part runs if its
+   * prediction fits.
    */
   function scanDocumentCost(): void {
     if (stopped) return;
     const body = doc.body;
     if (!body) return;
-    const elements = countElements(body);
-
-    if (elements > contrastDeferMax) {
-      scheduler.skip(DOCUMENT_COST_RULES);
-      debug('document-cost rules skipped; page too large', elements, DOCUMENT_COST_RULES);
-      return;
+    const gen = ++docGen;
+    partsAtDrain = countElements(body) > contrastDeferMax ? 'drop' : 'first';
+    for (const part of DOCUMENT_COST_PARTS) {
+      pendingParts.add(part.name);
+      scheduler.defer(part.rules);
+      scheduler.schedule(async () => {
+        if (stopped || gen !== docGen || !pendingParts.has(part.name)) return 0;
+        const { violations, ms } = await runDocumentCost(axe, doc, part.rules, opts.now);
+        // Abandoned or re-armed while it ran: its rules were already reported.
+        if (gen !== docGen || !pendingParts.delete(part.name)) return ms;
+        scheduler.unskip(part.rules);
+        if (firstRunMs !== null && firstRunMs > 0) ratios[part.name] = Math.max(ratios[part.name], ms / firstRunMs);
+        debug('document-cost part', part.name, ms, firstRunMs);
+        if (!stopped) report(violations);
+        return ms;
+      }, 0, {
+        idleOnly: true,
+        exemptFromAbort: true,
+        atDrain: partsAtDrain,
+        predictMs: () => partPredict(part.name),
+        onDrop: () => {
+          if (gen === docGen && pendingParts.delete(part.name)) scheduler.skip(part.rules);
+        },
+      });
     }
-    deferredDocumentCost = true;
-    // Deferred is not skipped and it is not done: the beacon says so.
-    scheduler.defer(DOCUMENT_COST_RULES);
-    debug('document-cost rules deferred until the tab hides', elements);
+    debug('document-cost parts armed', partsAtDrain);
   }
 
   return {
     scanDocumentCost,
-    hasDeferredDocumentCost: (): boolean => deferredDocumentCost && !stopped,
-
-    async runDeferredDocumentCost(): Promise<void> {
-      if (!deferredDocumentCost || deferredRunning || stopped) return;
-      // The pending flag stays set until the pass has actually finished, so a
-      // `pagehide` arriving mid-run still finds something to abandon and can
-      // report the rules as not run.
-      deferredRunning = true;
-      try {
-        const { violations, ms } = await runDocumentCost(axe, doc, DOCUMENT_COST_RULES, opts.now);
-        // Abandoned while we were waiting: its rules have already been reported
-        // as not run, so do not also report its findings.
-        if (!deferredDocumentCost) return;
-        deferredDocumentCost = false;
-        scheduler.unskip(DOCUMENT_COST_RULES);
-        // Reported like any job — the page paid for it — but it ran while the
-        // visitor was not looking, so it says nothing about the budget then.
-        scheduler.record(ms, { exemptFromAbort: true });
-        if (!stopped) report(violations);
-      } catch (err) {
-        deferredDocumentCost = false;
-        debug('deferred document-cost pass failed', err);
-      } finally {
-        deferredRunning = false;
-      }
-    },
+    hasDeferredDocumentCost: (): boolean => !stopped && partsAtDrain === 'first' && pendingParts.size > 0,
 
     abandonDeferredDocumentCost(): boolean {
-      if (!deferredDocumentCost) return false;
-      deferredDocumentCost = false;
-      scheduler.skip(DOCUMENT_COST_RULES);
-      debug('deferred document-cost pass abandoned', DOCUMENT_COST_RULES);
+      if (pendingParts.size === 0) return false;
+      for (const part of DOCUMENT_COST_PARTS) {
+        if (pendingParts.delete(part.name)) scheduler.skip(part.rules);
+      }
+      debug('document-cost parts abandoned');
       return true;
     },
+    predictedPartMs: partPredict,
 
     scanFull(): void {
       if (stopped || fullDone) return;
@@ -227,9 +222,16 @@ export function Engine(opts: EngineOptions): EngineApi {
       scheduler.schedule(async () => {
         if (stopped) return 0;
         const { violations, ms } = await runPage(axe, doc, opts.now);
+        if (firstRunMs === null) {
+          firstRunMs = ms;
+          const tier = pageTier(ms, ratios);
+          scheduler.setTier(tier);
+          debug('calibrated', { firstRunMs: ms, tier });
+          try { opts.onTier?.(tier); } catch { /* a callback never breaks a scan */ }
+        }
         if (!stopped) report(violations);
         return ms;
-      });
+      }, 0, opts.firstRunInWindow ? { idleOnly: true } : {});
       scanDocumentCost();
       const body = doc.body;
       if (!body) return;

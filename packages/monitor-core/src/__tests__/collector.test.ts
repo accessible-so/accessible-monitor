@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { COLLECTOR_VERSION, startCollector } from '../index';
 import type { AxeLike, AxeViolationLike } from '../index';
-import { DOCUMENT_COST_RULES } from '../engine/axe-runner';
+import { DOCUMENT_COST_PARTS, DOCUMENT_COST_RULES } from '../engine/axe-runner';
 import type { RumBeacon, RumConfig } from '../protocol/types';
 
 const stub = vi.hoisted(() => ({ observersThrow: false }));
@@ -328,14 +328,14 @@ describe('startCollector', () => {
     await settle();
 
     // Hidden: the document-cost pass, then the five sections still queued.
-    expect(axe.calls.length).toBe(7);
+    expect(axe.calls.length).toBe(8);
     // The first beacon left before any of that, and said the page was not
     // fully scanned; the last one went after the drain, and says it was.
     expect(beacons[0]!.perf!.aborted, 'a parked page was reported as fully scanned').toBe(true);
     const last = beacons.at(-1)!.perf!;
     expect(last.aborted).toBe(false);
-    expect(last.scans).toBe(7);
-    expect(last.longTasks).toBe(7);
+    expect(last.scans).toBe(8);
+    expect(last.longTasks).toBe(8);
     expect(last.pending).toBeUndefined();
   });
 
@@ -418,7 +418,7 @@ describe('startCollector', () => {
     expect(vi.getTimerCount()).toBe(0);
     vi.advanceTimersByTime(60_000);
     await micro();
-    expect(axe.calls.length).toBe(beforeHide + 1);
+    expect(axe.calls.length).toBe(beforeHide + 2);
     expect(beacons.length).toBe(1);
 
     // A click no longer reaches us either, and a second halt is a no-op.
@@ -543,6 +543,7 @@ describe('startCollector', () => {
  */
 describe('the document-cost pass, by page size', () => {
   type Context = Element | Document | { include: Element[] };
+  const isDocCost = (values: string[] | undefined): boolean => DOCUMENT_COST_PARTS.some((p) => p.rules === values);
 
   interface TieredAxe extends AxeLike {
     calls: { context: Context; values: string[] | undefined }[];
@@ -572,7 +573,7 @@ describe('the document-cost pass, by page size', () => {
       run(context: Context, options: object): Promise<{ violations: AxeViolationLike[] }> {
         const runOnly = (options as { runOnly?: { type: string; values: string[] } }).runOnly;
         calls.push({ context, values: runOnly?.values });
-        if (runOnly?.values === DOCUMENT_COST_RULES) {
+        if (isDocCost(runOnly?.values)) {
           const el = document.getElementById('low');
           return Promise.resolve({
             violations: el
@@ -602,7 +603,7 @@ describe('the document-cost pass, by page size', () => {
   }
 
   const documentCostRuns = (axe: TieredAxe): number =>
-    axe.calls.filter((c) => c.values === DOCUMENT_COST_RULES).length;
+    axe.calls.filter((c) => isDocCost(c.values)).length;
 
   /** A page of roughly `filler` spans, plus one low-contrast paragraph and one image. */
   function page(filler: number): void {
@@ -625,7 +626,7 @@ describe('the document-cost pass, by page size', () => {
     document.dispatchEvent(new Event('visibilitychange'));
     await settle();
 
-    expect(documentCostRuns(axe)).toBe(1);
+    expect(documentCostRuns(axe)).toBe(2);
     expect(beacons.flatMap((b) => b.findings ?? []).map((f) => f.rule)).toContain('wcag:1.4.3');
     expect(beacons.at(-1)!.perf!.skipped).toBeUndefined();
   });
@@ -643,7 +644,7 @@ describe('the document-cost pass, by page size', () => {
     document.dispatchEvent(new Event('visibilitychange'));
     await settle();
 
-    expect(documentCostRuns(axe), 'hiding the tab did not run the deferred pass').toBe(1);
+    expect(documentCostRuns(axe), 'hiding the tab did not run the deferred pass').toBe(2);
     // Two beacons, in this order and for this reason: everything the collector
     // already had goes out before a 250ms scan is started in a tab the browser
     // is free to freeze, and the contrast findings follow as their own beacon.
@@ -670,7 +671,7 @@ describe('the document-cost pass, by page size', () => {
     // A document-cost run that never resolves: a frozen tab, a hung rule.
     const stuck = { ...axe, run: (context: Context, options: object) => {
       const runOnly = (options as { runOnly?: { values: string[] } }).runOnly;
-      if (runOnly?.values === DOCUMENT_COST_RULES) return new Promise<never>(() => {});
+      if (isDocCost(runOnly?.values)) return new Promise<never>(() => {});
       return axe.run(context, options);
     } } as unknown as AxeLike;
     start(stuck);
@@ -716,7 +717,7 @@ describe('the document-cost pass, by page size', () => {
     setVisibility('hidden');
     document.dispatchEvent(new Event('visibilitychange'));
     await settle();
-    expect(documentCostRuns(mid), 'a 2,900-element page should defer, then run').toBe(1);
+    expect(documentCostRuns(mid), 'a 2,900-element page should defer, then run').toBe(2);
     for (const h of handles) h.stop();
     handles = [];
     beacons = [];
@@ -754,7 +755,7 @@ describe('the document-cost pass, by page size', () => {
     expect(rules()).toContain('wcag:1.1.1');
   });
 
-  it('never runs the pass on a very large page, and says so from the start', async () => {
+  it('never runs the pass on a very large page without a window, and says so', async () => {
     page(3200);
     const axe = tieredAxe();
     start(axe);

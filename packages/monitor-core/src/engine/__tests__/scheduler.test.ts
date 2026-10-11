@@ -448,3 +448,15 @@ describe('Scheduler mid-drain', () => {
     expect(scheduler.hasWork()).toBe(false);
   });
 });
+
+describe('Scheduler.hasWork and window-only parts', () => {
+  it('does not count a drain-first or drop window-only job as queued scanning', () => {
+    const scheduler = Scheduler({ win: idleWindow(), gate: manualGate() });
+    scheduler.schedule(() => Promise.resolve(1), 0, { idleOnly: true, atDrain: 'first' });
+    scheduler.schedule(() => Promise.resolve(1), 0, { idleOnly: true, atDrain: 'drop' });
+    expect(scheduler.hasWork()).toBe(false);
+    scheduler.schedule(() => Promise.resolve(1), 0, { idleOnly: true });
+    expect(scheduler.hasWork()).toBe(true);
+  });
+});
+

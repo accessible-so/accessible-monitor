@@ -394,7 +394,9 @@ export function Scheduler(options: SchedulerOptions): SchedulerApi {
       for (const rule of rules) { skipped.delete(rule); pending.delete(rule); }
     },
     chunkMax: () => chunk,
-    hasWork: (): boolean => !stopped && !aborted && (queue.length > 0 || current !== null),
+    // A window-only job that drain would run first or drop is the engine's document-cost
+    // part, which the engine reports through hasDeferredDocumentCost; it is not queued scanning.
+    hasWork: (): boolean => !stopped && !aborted && (queue.some((q) => !q.idleOnly || q.atDrain === 'run') || current !== null),
     drain,
     abandon(): void {
       if (stopped) return;

@@ -290,7 +290,7 @@ function wire(opts: StartOptions, win: Window & Flagged, doc: Document, life: Li
   async function runHiddenWork(reason: string): Promise<string> {
     let finished = reason;
     if (engine.hasDeferredDocumentCost()) {
-      await engine.runDeferredDocumentCost();
+      await scheduler.drain({ first: true });
       finished = `${reason}-contrast`;
     }
     if (scheduler.hasWork()) {

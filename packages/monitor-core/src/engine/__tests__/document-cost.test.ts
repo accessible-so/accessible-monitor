@@ -23,6 +23,7 @@ import {
 import type { AxeLike, AxeResultsLike } from '../axe-runner';
 import { Engine } from '../index';
 import { Scheduler } from '../scheduler';
+import type { IdleGateApi } from '../idle-gate';
 
 interface Call {
   context: Element | Document | { include: Element[]; exclude?: Element[] };
@@ -145,21 +146,58 @@ describe('the document-cost rule set', () => {
 });
 
 describe('Engine document-cost scheduling', () => {
-  function build(axe: AxeLike, contrastDeferMaxElements = 3000, chunkMax?: number) {
-    const scheduler = Scheduler({ win: idleWindow(), chunkMax });
+  function build(
+    axe: AxeLike,
+    o: { contrastDeferMaxElements?: number; chunkMax?: number; gate?: IdleGateApi; now?: () => number; firstRunInWindow?: boolean } = {},
+  ) {
+    const scheduler = Scheduler({ win: idleWindow(), chunkMax: o.chunkMax, gate: o.gate });
     const engine = Engine({
       doc: document,
       win: idleWindow(),
       axe,
       scheduler,
       onViolation: () => {},
-      contrastDeferMaxElements,
+      contrastDeferMaxElements: o.contrastDeferMaxElements ?? 3000,
+      now: o.now,
+      firstRunInWindow: o.firstRunInWindow,
     });
     return { scheduler, engine };
   }
 
   const documentCostRuns = (axe: AxeLike & { calls: Call[] }): Call[] =>
-    axe.calls.filter((c) => c.options.runOnly?.values === DOCUMENT_COST_RULES);
+    axe.calls.filter((c) => DOCUMENT_COST_PARTS.some((p) => p.rules === c.options.runOnly?.values));
+
+  /** A gate the test opens and closes by hand. */
+  function manualGate(): IdleGateApi & { open(): void; close(): void } {
+    let open = false;
+    let waiters: (() => void)[] = [];
+    return {
+      isOpen: () => open,
+      whenOpen(cb) { waiters.push(cb); if (open) this.open(); },
+      detach() { waiters = []; },
+      open() { open = true; const w = waiters; waiters = []; for (const cb of w) cb(); },
+      close() { open = false; },
+    };
+  }
+
+  /** Every run advances `clock.t` by a cost chosen from what it was asked to run. */
+  function costedAxe(cost: { page: number; grid: number; region: number; chunk: number }) {
+    const clock = { t: 0 };
+    const base = fakeAxe();
+    const axe = {
+      calls: base.calls,
+      run(context: Element | Document, options: Parameters<AxeLike['run']>[1]) {
+        const runOnly = (options as Call['options'] | undefined)?.runOnly;
+        const values = runOnly?.type === 'rule' ? runOnly.values : null;
+        clock.t += values === PAGE_LEVEL_RULES ? cost.page
+          : values?.includes('region') ? cost.region
+          : values?.includes('color-contrast') ? cost.grid
+          : cost.chunk;
+        return base.run(context, options);
+      },
+    };
+    return { axe, now: () => clock.t };
+  }
 
   it('defers the pass even on a small page, and runs it on the document when asked', async () => {
     // A 120-element page costs ~22ms on a fast laptop and ~76ms on a mid-range
@@ -174,8 +212,8 @@ describe('Engine document-cost scheduling', () => {
     expect(engine.hasDeferredDocumentCost()).toBe(true);
     expect(scheduler.perf().pending).toEqual(DOCUMENT_COST_RULES);
 
-    await engine.runDeferredDocumentCost();
-    expect(documentCostRuns(axe)).toHaveLength(1);
+    await scheduler.drain({ first: true });
+    expect(documentCostRuns(axe).map((c) => c.options.runOnly!.values)).toEqual([DOCUMENT_COST_PARTS[0]!.rules, DOCUMENT_COST_PARTS[1]!.rules]);
     expect(documentCostRuns(axe)[0]!.context).toBe(document);
     expect(engine.hasDeferredDocumentCost()).toBe(false);
     expect(scheduler.perf().pending, 'a pass that ran is not pending').toBeUndefined();
@@ -198,9 +236,9 @@ describe('Engine document-cost scheduling', () => {
     expect(scheduler.perf().skipped).toBeUndefined();
     expect(scheduler.perf().pending, 'a postponed pass says so').toEqual(DOCUMENT_COST_RULES);
 
-    await engine.runDeferredDocumentCost();
+    await scheduler.drain({ first: true });
 
-    expect(documentCostRuns(axe)).toHaveLength(1);
+    expect(documentCostRuns(axe)).toHaveLength(2);
     expect(engine.hasDeferredDocumentCost()).toBe(false);
     expect(scheduler.perf().skipped, 'a pass that ran is not a pass that was skipped').toBeUndefined();
     expect(scheduler.perf().pending, 'a pass that ran is not still pending').toBeUndefined();
@@ -230,7 +268,7 @@ describe('Engine document-cost scheduling', () => {
     const stuck = {
       run: (_c: unknown, options: object) => {
         const runOnly = (options as { runOnly?: { values: string[] } }).runOnly;
-        if (runOnly?.values === DOCUMENT_COST_RULES) {
+        if (DOCUMENT_COST_PARTS.some((p) => p.rules === runOnly?.values)) {
           return new Promise<AxeResultsLike>((resolve) => { release = resolve; });
         }
         return Promise.resolve({ violations: [] });
@@ -249,7 +287,7 @@ describe('Engine document-cost scheduling', () => {
 
     engine.scanDocumentCost();
     expect(engine.hasDeferredDocumentCost()).toBe(true);
-    void engine.runDeferredDocumentCost();
+    void scheduler.drain({ first: true });
     await micro();
 
     // Still pending: the flag is not cleared until the pass has actually run,
@@ -275,10 +313,11 @@ describe('Engine document-cost scheduling', () => {
   it('skips the pass outright above the defer ceiling', async () => {
     document.body.innerHTML = `<main>${'<p>x</p>'.repeat(40)}</main>`;
     const axe = fakeAxe();
-    const { scheduler, engine } = build(axe, 20);
+    const { scheduler, engine } = build(axe, { contrastDeferMaxElements: 20 });
 
     engine.scanFull();
     await micro();
+    await scheduler.drain();
 
     expect(documentCostRuns(axe)).toHaveLength(0);
     expect(engine.hasDeferredDocumentCost(), 'too large to be worth deferring').toBe(false);
@@ -293,10 +332,11 @@ describe('Engine document-cost scheduling', () => {
     // runs it. The beacon must not still claim those rules went unchecked.
     document.body.innerHTML = `<main>${'<p>x</p>'.repeat(40)}</main>`;
     const axe = fakeAxe();
-    const { scheduler, engine } = build(axe, 20);
+    const { scheduler, engine } = build(axe, { contrastDeferMaxElements: 20 });
 
     engine.scanFull();
     await micro();
+    await scheduler.drain();
     expect(scheduler.perf().skipped).toEqual(DOCUMENT_COST_RULES);
 
     // The SPA swaps in a much smaller view: the pass is worth running again,
@@ -306,8 +346,8 @@ describe('Engine document-cost scheduling', () => {
     expect(scheduler.perf().skipped, 'a rule now waiting was still reported as skipped').toBeUndefined();
     expect(scheduler.perf().pending).toEqual(DOCUMENT_COST_RULES);
 
-    await engine.runDeferredDocumentCost();
-    expect(documentCostRuns(axe)).toHaveLength(1);
+    await scheduler.drain({ first: true });
+    expect(documentCostRuns(axe)).toHaveLength(2);
     expect(scheduler.perf().skipped).toBeUndefined();
     expect(scheduler.perf().pending).toBeUndefined();
   });
@@ -322,7 +362,7 @@ describe('Engine document-cost scheduling', () => {
     const axe = fakeAxe();
     // A chunk budget small enough that <main> and <select> are both split, and
     // large enough that the <select>'s subtree still affords a container chunk.
-    const { engine } = build(axe, 0, 20);
+    const { engine } = build(axe, { contrastDeferMaxElements: 0, chunkMax: 20 });
 
     engine.scanFull();
     await micro();
@@ -355,8 +395,98 @@ describe('Engine document-cost scheduling', () => {
     await micro();
     expect(documentCostRuns(axe), 'a route change must not run it while the visitor is looking').toHaveLength(0);
 
-    await engine.runDeferredDocumentCost();
-    expect(documentCostRuns(axe)).toHaveLength(1);
+    await scheduler.drain({ first: true });
+    expect(documentCostRuns(axe)).toHaveLength(2);
     expect(scheduler.perf().skipped).toBeUndefined();
+  });
+
+  it('queues the two parts as window-only jobs, pending until they run', async () => {
+    const axe = fakeAxe();
+    const { engine, scheduler } = build(axe);
+    engine.scanFull();
+    await micro();
+    expect(scheduler.perf().pending).toEqual(DOCUMENT_COST_RULES);
+    expect(documentCostRuns(axe)).toHaveLength(0);
+    expect(engine.hasDeferredDocumentCost()).toBe(true);
+    await scheduler.drain();
+    expect(scheduler.perf().pending).toBeUndefined();
+    expect(documentCostRuns(axe).map((c) => c.options.runOnly!.values)).toEqual([DOCUMENT_COST_PARTS[0]!.rules, DOCUMENT_COST_PARTS[1]!.rules]);
+  });
+
+  it('runs both parts in an idle window when their predictions fit: a fast page', async () => {
+    // First run 12 ms: grid predicted 120, region 48 — both within 150.
+    const { axe, now } = costedAxe({ page: 12, grid: 30, region: 20, chunk: 5 });
+    const gate = manualGate();
+    const { engine, scheduler } = build(axe, { gate, now });
+    engine.scanFull();
+    await micro();
+    expect(scheduler.perf().pending).toEqual(DOCUMENT_COST_RULES);
+    gate.open();
+    await micro();
+    expect(scheduler.perf().pending).toBeUndefined();
+    expect(scheduler.perf().tier).toBe('fast');
+  });
+
+  it('leaves a part for tab-hide when its prediction does not fit a window: a medium page', async () => {
+    // First run 20 ms: grid predicted 200 (does not fit), region 80 (fits).
+    const { axe, now } = costedAxe({ page: 20, grid: 40, region: 20, chunk: 5 });
+    const gate = manualGate();
+    const { engine, scheduler } = build(axe, { gate, now });
+    engine.scanFull();
+    await micro();
+    gate.open();
+    await micro();
+    expect(scheduler.perf().pending).toEqual(DOCUMENT_COST_PARTS[0]!.rules);
+    expect(scheduler.perf().tier).toBe('medium');
+  });
+
+  it('learns from a part that ran longer than predicted, so the mistake is made once per page', async () => {
+    // First run 10 ms. Region predicted 40 but takes 60 (ratio 6 > 4); grid predicted 100, takes 50 (ratio stays 10).
+    const { axe, now } = costedAxe({ page: 10, grid: 50, region: 60, chunk: 5 });
+    const gate = manualGate();
+    const { engine } = build(axe, { gate, now });
+    engine.scanFull();
+    await micro();
+    expect(engine.predictedPartMs('region')).toBe(40);
+    gate.open();
+    await micro();
+    expect(engine.predictedPartMs('region')).toBe(60);
+    expect(engine.predictedPartMs('grid')).toBe(100);
+  });
+
+  it('drops the parts at drain on a page over the element ceiling, reporting them skipped', async () => {
+    const axe = fakeAxe();
+    const { engine, scheduler } = build(axe, { contrastDeferMaxElements: 1 });
+    engine.scanFull();
+    await micro();
+    expect(engine.hasDeferredDocumentCost(), 'a part that can only be dropped is not deferred work').toBe(false);
+    await scheduler.drain();
+    expect(scheduler.perf().skipped).toEqual(DOCUMENT_COST_RULES);
+    expect(scheduler.perf().pending).toBeUndefined();
+  });
+
+  it('a re-arm abandons nothing on its own; abandon reports the pending parts as skipped', async () => {
+    const axe = fakeAxe();
+    const { engine, scheduler } = build(axe);
+    engine.scanFull();
+    await micro();
+    expect(engine.abandonDeferredDocumentCost()).toBe(true);
+    expect(scheduler.perf().skipped).toEqual(DOCUMENT_COST_RULES);
+    expect(engine.abandonDeferredDocumentCost()).toBe(false);
+    engine.scanDocumentCost();
+    expect(scheduler.perf().pending).toEqual(DOCUMENT_COST_RULES);
+    expect(scheduler.perf().skipped).toBeUndefined();
+  });
+
+  it('with firstRunInWindow, the first run waits for a window', async () => {
+    const axe = fakeAxe();
+    const gate = manualGate();
+    const { engine } = build(axe, { gate, firstRunInWindow: true });
+    engine.scanFull();
+    await micro();
+    expect(axe.calls.some((c) => c.context === document && c.options.runOnly?.values === PAGE_LEVEL_RULES)).toBe(false);
+    gate.open();
+    await micro();
+    expect(axe.calls.some((c) => c.context === document && c.options.runOnly?.values === PAGE_LEVEL_RULES)).toBe(true);
   });
 });
