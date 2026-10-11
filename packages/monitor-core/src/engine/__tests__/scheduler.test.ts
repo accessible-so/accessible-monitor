@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Scheduler } from '../scheduler';
+import type { IdleGateApi } from '../idle-gate';
 
 /** A window whose idle callback runs synchronously. */
 function idleWindow(): Window {
@@ -230,5 +231,167 @@ describe('Scheduler', () => {
     await micro();
     expect(ran).toBe(1);
     expect(scheduler.perf().aborted).toBe(false);
+  });
+});
+
+
+/** A gate the test opens and closes by hand. */
+function manualGate(): IdleGateApi & { open(): void; close(): void } {
+  let open = false;
+  let waiters: (() => void)[] = [];
+  return {
+    isOpen: () => open,
+    whenOpen(cb) { waiters.push(cb); if (open) this.open(); },
+    detach() { waiters = []; },
+    open() { open = true; const w = waiters; waiters = []; for (const cb of w) cb(); },
+    close() { open = false; },
+  };
+}
+
+describe('Scheduler idle windows', () => {
+  it('resumes a parked queue in an idle window, one task at a time', async () => {
+    const gate = manualGate();
+    const scheduler = Scheduler({ win: idleWindow(), gate });
+    const ran: string[] = [];
+    scheduler.schedule(() => { ran.push('long'); return Promise.resolve(80); });
+    scheduler.schedule(() => { ran.push('a'); return Promise.resolve(20); }, 0, { predictMs: () => 20 });
+    scheduler.schedule(() => { ran.push('b'); return Promise.resolve(20); }, 0, { predictMs: () => 20 });
+    await micro();
+    expect(ran).toEqual(['long']);
+    gate.open();
+    await micro();
+    expect(ran).toEqual(['long', 'a', 'b']);
+    expect(scheduler.perf().idleRuns).toBe(2);
+    expect(scheduler.perf().aborted).toBe(false);
+  });
+
+  it('never starts a task in a window when it is predicted over the idle budget', async () => {
+    const gate = manualGate();
+    const scheduler = Scheduler({ win: idleWindow(), gate });
+    let big = false;
+    let small = false;
+    scheduler.schedule(() => { big = true; return Promise.resolve(400); }, 0, { idleOnly: true, predictMs: () => 400 });
+    scheduler.schedule(() => { small = true; return Promise.resolve(30); }, 0, { idleOnly: true, predictMs: () => 30 });
+    gate.open();
+    await micro();
+    expect(big, 'a 400 ms prediction ran in a 150 ms window').toBe(false);
+    expect(small, 'a task behind it was blocked').toBe(true);
+    expect(scheduler.hasWork()).toBe(true);
+  });
+
+  it('runs an idleOnly job only in a window, never in an ordinary idle callback', async () => {
+    const gate = manualGate();
+    const scheduler = Scheduler({ win: idleWindow(), gate });
+    let ran = false;
+    scheduler.schedule(() => { ran = true; return Promise.resolve(10); }, 0, { idleOnly: true });
+    await micro();
+    expect(ran).toBe(false);
+    gate.open();
+    await micro();
+    expect(ran).toBe(true);
+  });
+
+  it('stops starting tasks the moment the window closes', async () => {
+    const gate = manualGate();
+    const scheduler = Scheduler({ win: idleWindow(), gate });
+    const ran: number[] = [];
+    scheduler.schedule(() => Promise.resolve(80));
+    for (let i = 0; i < 3; i++) {
+      scheduler.schedule(() => { ran.push(i); if (i === 0) gate.close(); return Promise.resolve(20); }, 0, { predictMs: () => 20 });
+    }
+    await micro();
+    gate.open();
+    await micro();
+    expect(ran).toEqual([0]);
+  });
+
+  it('a window task over the active budget does not park the queue', async () => {
+    const gate = manualGate();
+    const scheduler = Scheduler({ win: idleWindow(), gate });
+    gate.open();
+    const ran: string[] = [];
+    scheduler.schedule(() => { ran.push('window'); return Promise.resolve(120); }, 0, { idleOnly: true, predictMs: () => 120 });
+    scheduler.schedule(() => { ran.push('next'); return Promise.resolve(10); });
+    await micro();
+    expect(ran).toEqual(['window', 'next']);
+    expect(scheduler.perf().longTasks).toBe(1);
+    expect(scheduler.perf().aborted).toBe(false);
+  });
+
+  it('without a gate, behaves exactly as before: parked until drain', async () => {
+    const scheduler = Scheduler({ win: idleWindow() });
+    let second = false;
+    scheduler.schedule(() => Promise.resolve(80));
+    scheduler.schedule(() => { second = true; return Promise.resolve(1); });
+    await micro();
+    expect(second).toBe(false);
+    await scheduler.drain();
+    expect(second).toBe(true);
+  });
+
+  it('works with the setTimeout fallback when there is no requestIdleCallback', async () => {
+    const gate = manualGate();
+    const win = { setTimeout: (cb: () => void) => setTimeout(cb, 0), clearTimeout: (h: number) => clearTimeout(h) } as unknown as Window;
+    const scheduler = Scheduler({ win, gate });
+    let ran = false;
+    scheduler.schedule(() => { ran = true; return Promise.resolve(10); }, 0, { idleOnly: true });
+    gate.open();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(ran).toBe(true);
+  });
+});
+
+describe('Scheduler drain order', () => {
+  it('runs first-jobs first, drops drop-jobs, then the rest; drain({ first }) stops after the first-jobs', async () => {
+    const scheduler = Scheduler({ win: idleWindow() });
+    const ran: string[] = [];
+    const dropped: string[] = [];
+    scheduler.schedule(() => Promise.resolve(80)); // parks
+    scheduler.schedule(() => { ran.push('chunk'); return Promise.resolve(10); });
+    scheduler.schedule(() => { ran.push('grid'); return Promise.resolve(10); }, 0, { idleOnly: true, atDrain: 'first' });
+    scheduler.schedule(() => { ran.push('huge'); return Promise.resolve(10); }, 0, { idleOnly: true, atDrain: 'drop', onDrop: () => dropped.push('huge') });
+    await micro();
+    await scheduler.drain({ first: true });
+    expect(ran).toEqual(['grid']);
+    expect(dropped).toEqual(['huge']);
+    expect(scheduler.hasWork()).toBe(true);
+    await scheduler.drain();
+    expect(ran).toEqual(['grid', 'chunk']);
+    expect(scheduler.hasWork()).toBe(false);
+    expect(scheduler.perf().aborted).toBe(false);
+  });
+
+  it('waits for an in-flight window task before running anything, so axe never runs twice at once', async () => {
+    const gate = manualGate();
+    const scheduler = Scheduler({ win: idleWindow(), gate });
+    let inFlight = 0;
+    let overlapped = false;
+    let release!: () => void;
+    const job = (hold: boolean) => async () => {
+      if (inFlight > 0) overlapped = true;
+      inFlight++;
+      if (hold) await new Promise<void>((r) => { release = r; });
+      inFlight--;
+      return 10;
+    };
+    scheduler.schedule(job(true), 0, { idleOnly: true });
+    scheduler.schedule(job(false), 0, { idleOnly: true, atDrain: 'first' });
+    gate.open();
+    await micro();
+    gate.close();
+    const draining = scheduler.drain();
+    await micro();
+    release();
+    await draining;
+    expect(overlapped).toBe(false);
+    expect(scheduler.hasWork()).toBe(false);
+  });
+
+  it('reports the page tier once set, and idleRuns only when there were any', () => {
+    const scheduler = Scheduler({ win: idleWindow() });
+    expect(scheduler.perf().tier).toBeUndefined();
+    expect('idleRuns' in scheduler.perf()).toBe(false);
+    scheduler.setTier('medium');
+    expect(scheduler.perf().tier).toBe('medium');
   });
 });

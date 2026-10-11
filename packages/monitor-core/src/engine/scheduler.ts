@@ -27,7 +27,18 @@
  * the total unbounded. `maxScans` caps how many jobs one page may run and
  * `maxScannedElements` caps how many elements they may cover; either one
  * aborts exactly like the time budget.
+ *
+ * While parked, and for jobs marked `idleOnly`, a task may still start in an
+ * idle window (`gate`), if its predicted cost fits `idleBudgetMs`. A window
+ * task is exempt from parking: it was allowed to be long because nobody was
+ * interacting.
  */
+
+import type { IdleGateApi } from './idle-gate';
+import type { PageTier } from '../protocol/types';
+
+/** The longest task allowed to start in an idle window. Spec §3.2. */
+export const IDLE_BUDGET_MS = 150;
 
 export interface SchedulerPerf {
   scans: number;
@@ -43,6 +54,8 @@ export interface SchedulerPerf {
    * leaves both if the pass runs. Absent when nothing is pending.
    */
   pending?: string[];
+  tier?: PageTier;
+  idleRuns?: number;
 }
 
 export type SchedulerJob = () => Promise<number>;
@@ -57,6 +70,8 @@ export interface SchedulerOptions {
   /** Most elements one page's scans may cover before collection stops. */
   maxScannedElements?: number;
   onPerf?: (perf: SchedulerPerf) => void;
+  gate?: IdleGateApi;
+  idleBudgetMs?: number;
 }
 
 export interface ScheduleOptions {
@@ -68,6 +83,13 @@ export interface ScheduleOptions {
    * someone is looking, so it never parks the queue.
    */
   exemptFromAbort?: boolean;
+  /** Runs only in an idle window, or at drain. */
+  idleOnly?: boolean;
+  /** Predicted cost in ms; null when unknown. A job predicted over idleBudgetMs never starts in a window. */
+  predictMs?: () => number | null;
+  /** At drain: 'first' runs before everything else; 'run' (default) in queue order; 'drop' is removed, calling onDrop. */
+  atDrain?: 'first' | 'run' | 'drop';
+  onDrop?: () => void;
 }
 
 export interface SchedulerApi {
@@ -106,7 +128,9 @@ export interface SchedulerApi {
    * protect. Resolves when the queue is empty or `abandon()`/`stop()` cut it
    * short. An emptied queue un-parks the page.
    */
-  drain(): Promise<void>;
+  /** With { first: true }, runs only the atDrain:'first' jobs (and drops the 'drop' ones). */
+  drain(options?: { first?: boolean }): Promise<void>;
+  setTier(tier: PageTier): void;
   /** Drop queued work that will not get to run, and say so: the page was not fully scanned. */
   abandon(): void;
   perf(): SchedulerPerf;
@@ -116,6 +140,10 @@ export interface SchedulerApi {
 interface QueuedJob {
   job: SchedulerJob;
   exempt: boolean;
+  idleOnly: boolean;
+  predictMs?: () => number | null;
+  atDrain: 'first' | 'run' | 'drop';
+  onDrop?: () => void;
 }
 
 type IdleWindow = Window & {
@@ -137,6 +165,12 @@ export function Scheduler(options: SchedulerOptions): SchedulerApi {
   let stopped = false;
   let aborted = false;
   let parked = false;
+  const gate = options.gate;
+  const idleBudgetMs = options.idleBudgetMs ?? IDLE_BUDGET_MS;
+  let draining = false;
+  let waitingForWindow = false;
+  let idleRuns = 0;
+  let tier: PageTier | undefined;
   let current: Promise<void> | null = null;
   let scans = 0;
   let overBudget = 0;
@@ -151,9 +185,12 @@ export function Scheduler(options: SchedulerOptions): SchedulerApi {
   }
 
   function perf(): SchedulerPerf {
-    const stats: SchedulerPerf = { scans, longTasks: overBudget, maxTaskMs, aborted: aborted || parked };
+    const unfinished = parked && (queue.length > 0 || current !== null);
+    const stats: SchedulerPerf = { scans, longTasks: overBudget, maxTaskMs, aborted: aborted || unfinished };
     if (skipped.size > 0) stats.skipped = Array.from(skipped);
     if (pending.size > 0) stats.pending = Array.from(pending);
+    if (tier) stats.tier = tier;
+    if (idleRuns > 0) stats.idleRuns = idleRuns;
     return stats;
   }
 
@@ -233,29 +270,78 @@ export function Scheduler(options: SchedulerOptions): SchedulerApi {
     }
   }
 
+  function fitsWindow(j: QueuedJob): boolean {
+    let predicted: number | null = null;
+    try { predicted = j.predictMs?.() ?? null; } catch { predicted = null; }
+    return predicted === null || predicted <= idleBudgetMs;
+  }
+
+  /** The next job to start now, and whether it starts in an idle window. */
+  function pick(): { index: number; inWindow: boolean } | null {
+    if (!parked) {
+      const index = queue.findIndex((j) => !j.idleOnly);
+      if (index !== -1) return { index, inWindow: false };
+    }
+    let open = false;
+    try { open = gate?.isOpen() === true; } catch { open = false; }
+    if (open) {
+      const index = queue.findIndex(fitsWindow);
+      if (index !== -1) return { index, inWindow: true };
+    }
+    return null;
+  }
+
+  /** Nothing can start now: ask the gate to call back, if a window could run anything. */
+  function waitForWindow(): void {
+    if (!gate || waitingForWindow || stopped || aborted) return;
+    if (!queue.some(fitsWindow)) return; // only drain can run what is left
+    waitingForWindow = true;
+    try {
+      gate.whenOpen(() => { waitingForWindow = false; pump(); });
+    } catch {
+      waitingForWindow = false;
+    }
+  }
+
   function pump(): void {
-    if (stopped || aborted || parked || running || queue.length === 0) return;
+    if (stopped || aborted || running || draining || queue.length === 0) return;
+    if (!pick()) { waitForWindow(); return; }
     running = true;
     idle(() => {
-      const next = queue.shift();
-      if (!next || stopped || aborted) { running = false; return; }
-      current = runJob(next.job).then((ms) => {
+      if (stopped || aborted || draining) { running = false; return; }
+      // Picked again inside the callback: the window may have closed while we waited for it.
+      const choice = pick();
+      if (!choice) { running = false; waitForWindow(); return; }
+      const [next] = queue.splice(choice.index, 1);
+      if (choice.inWindow) idleRuns++;
+      current = runJob(next!.job).then((ms) => {
         current = null;
-        finish(ms, next.exempt);
+        finish(ms, next!.exempt || choice.inWindow);
       });
     });
   }
 
-  async function drain(): Promise<void> {
-    // Whatever an idle callback already started finishes first; nothing new
-    // starts from one again.
+  async function drain(drainOptions: { first?: boolean } = {}): Promise<void> {
+    // Whatever an idle callback already started finishes first — axe must
+    // never run twice at once — and nothing new starts from one again.
+    draining = true;
     parked = true;
     cancelIdle();
     if (current) await current;
-    while (!stopped && !aborted && queue.length > 0) {
-      const next = queue.shift()!;
+    running = false;
+    for (const j of queue.filter((q) => q.atDrain === 'drop')) {
+      try { j.onDrop?.(); } catch { /* bookkeeping never throws */ }
+    }
+    queue = queue.filter((q) => q.atDrain !== 'drop');
+    const take = (): QueuedJob | undefined => {
+      let index = queue.findIndex((q) => q.atDrain === 'first');
+      if (index === -1 && !drainOptions.first) index = queue.length > 0 ? 0 : -1;
+      return index === -1 ? undefined : queue.splice(index, 1)[0];
+    };
+    for (let next = take(); next && !stopped && !aborted; next = take()) {
       account(await runJob(next.job), true);
     }
+    draining = false;
     if (!stopped && !aborted && queue.length === 0) {
       parked = false;
       try { options.onPerf?.(perf()); } catch { /* bookkeeping never throws */ }
@@ -269,7 +355,14 @@ export function Scheduler(options: SchedulerOptions): SchedulerApi {
         if (scannedElements + elements > maxScannedElements) { abort(); return; }
         scannedElements += elements;
       }
-      queue.push({ job, exempt: options.exemptFromAbort === true });
+      queue.push({
+        job,
+        exempt: options.exemptFromAbort === true,
+        idleOnly: options.idleOnly === true,
+        predictMs: options.predictMs,
+        atDrain: options.atDrain ?? 'run',
+        onDrop: options.onDrop,
+      });
       pump();
     },
     record(ms: number, options: ScheduleOptions = {}): void {
@@ -295,6 +388,7 @@ export function Scheduler(options: SchedulerOptions): SchedulerApi {
       if (queue.length > 0 || current !== null || parked) abort();
     },
     perf,
+    setTier(next: PageTier): void { tier = next; },
     stop(): void {
       stopped = true;
       queue = [];
