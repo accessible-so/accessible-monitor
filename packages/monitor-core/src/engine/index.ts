@@ -104,29 +104,29 @@ export function Engine(opts: EngineOptions): EngineApi {
    * spawned by `scanRoot` charges nothing: its root already paid for the
    * whole subtree when it was queued.
    */
-  function scanChunk(chunk: Chunk, elements = 0): void {
+  function scanChunk(chunk: Chunk, elements = 0, idleOnly = false): void {
     scheduler.schedule(async () => {
       if (stopped) return 0;
       const { violations, ms } = await runChunk(axe, chunk, opts.now);
       lastChunkMs = ms;
       if (!stopped) report(violations);
       return ms;
-    }, elements, { predictMs: chunkPredict });
+    }, elements, { predictMs: chunkPredict, idleOnly });
   }
 
   /** Split at run time, so a shrunken chunk budget applies to work not yet done. */
-  function scanRoot(root: Element): void {
+  function scanRoot(root: Element, idleOnly = false): void {
     scheduler.schedule(async () => {
       if (stopped || !root.isConnected) return 0;
       const chunks = splitIntoChunks(root, scheduler.chunkMax());
-      for (let i = 1; i < chunks.length; i++) scanChunk(chunks[i]!);
+      for (let i = 1; i < chunks.length; i++) scanChunk(chunks[i]!, 0, idleOnly);
       const first = chunks[0];
       if (!first) return 0;
       const { violations, ms } = await runChunk(axe, first, opts.now);
       lastChunkMs = ms;
       if (!stopped) report(violations);
       return ms;
-    }, countElements(root) + 1, { predictMs: chunkPredict });
+    }, countElements(root) + 1, { predictMs: chunkPredict, idleOnly });
   }
 
   function orderVisibleFirst(elements: Element[], done: (ordered: Element[]) => void): void {
@@ -239,7 +239,7 @@ export function Engine(opts: EngineOptions): EngineApi {
       if (tops.length === 0) return;
       orderVisibleFirst(tops, (ordered) => {
         if (stopped) return;
-        for (const el of ordered) scanRoot(el);
+        for (const el of ordered) scanRoot(el, opts.firstRunInWindow === true);
       });
     },
     scanRoots(roots: Element[]): void {

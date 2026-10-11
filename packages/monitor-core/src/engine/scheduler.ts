@@ -98,13 +98,6 @@ export interface SchedulerApi {
    * against the page's element ceiling when the job is queued.
    */
   schedule(job: SchedulerJob, elements?: number, options?: ScheduleOptions): void;
-  /**
-   * Account for a job the caller ran itself rather than queueing — the
-   * deferred document-cost pass, which has to finish before the last beacon
-   * and so cannot wait for an idle callback. The time is reported exactly as a
-   * queued job's would be.
-   */
-  record(ms: number, options?: ScheduleOptions): void;
   /** Record rules the engine chose not to run, so the beacon can say so. */
   skip(rules: readonly string[]): void;
   /**
@@ -120,7 +113,7 @@ export interface SchedulerApi {
    */
   unskip(rules: readonly string[]): void;
   chunkMax(): number;
-  /** True while there is queued work — parked or merely not reached yet. */
+  /** True while there is queued scanning — parked or merely not reached yet. Queued window-only document-cost parts are not scanning and do not count. */
   hasWork(): boolean;
   /**
    * Run everything queued, now, one job after another and outside idle
@@ -187,7 +180,7 @@ export function Scheduler(options: SchedulerOptions): SchedulerApi {
   }
 
   function perf(): SchedulerPerf {
-    const unfinished = parked && (queue.length > 0 || current !== null);
+    const unfinished = parked && (scanQueued() || current !== null);
     const stats: SchedulerPerf = { scans, longTasks: overBudget, maxTaskMs, aborted: aborted || unfinished };
     if (skipped.size > 0) stats.skipped = Array.from(skipped);
     if (pending.size > 0) stats.pending = Array.from(pending);
@@ -270,6 +263,11 @@ export function Scheduler(options: SchedulerOptions): SchedulerApi {
     } catch {
       return Promise.resolve(0);
     }
+  }
+
+  /** Queued scanning: everything except window-only jobs that drain runs first or drops (the engine's document-cost parts). */
+  function scanQueued(): boolean {
+    return queue.some((q) => !q.idleOnly || q.atDrain === 'run');
   }
 
   function fitsWindow(j: QueuedJob): boolean {
@@ -378,9 +376,6 @@ export function Scheduler(options: SchedulerOptions): SchedulerApi {
       });
       pump();
     },
-    record(ms: number, options: ScheduleOptions = {}): void {
-      account(ms, options.exemptFromAbort === true);
-    },
     skip(rules: readonly string[]): void {
       // Giving up on a postponed pass is the one way out of `pending`: the two
       // lists are disjoint by construction, here and in `defer`.
@@ -396,11 +391,11 @@ export function Scheduler(options: SchedulerOptions): SchedulerApi {
     chunkMax: () => chunk,
     // A window-only job that drain would run first or drop is the engine's document-cost
     // part, which the engine reports through hasDeferredDocumentCost; it is not queued scanning.
-    hasWork: (): boolean => !stopped && !aborted && (queue.some((q) => !q.idleOnly || q.atDrain === 'run') || current !== null),
+    hasWork: (): boolean => !stopped && !aborted && (scanQueued() || current !== null),
     drain,
     abandon(): void {
       if (stopped) return;
-      if (queue.length > 0 || current !== null || parked) abort();
+      if (scanQueued() || current !== null || parked) abort();
     },
     perf,
     setTier(next: PageTier): void { tier = next; },

@@ -310,7 +310,7 @@ describe('Engine document-cost scheduling', () => {
     expect(scheduler.perf().skipped).toEqual(DOCUMENT_COST_RULES);
   });
 
-  it('skips the pass outright above the defer ceiling', async () => {
+  it('skips the pass at drain above the defer ceiling', async () => {
     document.body.innerHTML = `<main>${'<p>x</p>'.repeat(40)}</main>`;
     const axe = fakeAxe();
     const { scheduler, engine } = build(axe, { contrastDeferMaxElements: 20 });
@@ -484,9 +484,23 @@ describe('Engine document-cost scheduling', () => {
     const { engine } = build(axe, { gate, firstRunInWindow: true });
     engine.scanFull();
     await micro();
-    expect(axe.calls.some((c) => c.context === document && c.options.runOnly?.values === PAGE_LEVEL_RULES)).toBe(false);
+    expect(axe.calls, 'something ran before a window').toHaveLength(0);
     gate.open();
     await micro();
     expect(axe.calls.some((c) => c.context === document && c.options.runOnly?.values === PAGE_LEVEL_RULES)).toBe(true);
+  });
+
+  it('abandons parts a dead scheduler cannot run, reporting them skipped', async () => {
+    document.body.innerHTML = '<main><p>x</p></main>';
+    const axe = fakeAxe();
+    const scheduler = Scheduler({ win: idleWindow(), maxScans: 1 });
+    const engine = Engine({ doc: document, win: idleWindow(), axe, scheduler, onViolation: () => {} });
+    engine.scanFull();
+    await micro();
+    await scheduler.drain({ first: true });
+    expect(engine.hasDeferredDocumentCost()).toBe(true);
+    expect(engine.abandonDeferredDocumentCost()).toBe(true);
+    expect(scheduler.perf().skipped).toEqual(DOCUMENT_COST_RULES);
+    expect(scheduler.perf().pending).toBeUndefined();
   });
 });

@@ -458,5 +458,14 @@ describe('Scheduler.hasWork and window-only parts', () => {
     scheduler.schedule(() => Promise.resolve(1), 0, { idleOnly: true });
     expect(scheduler.hasWork()).toBe(true);
   });
-});
 
+  it('is not aborted when parked with only window-only parts left, and is when scanning is left', async () => {
+    const scheduler = Scheduler({ win: idleWindow(), gate: manualGate() });
+    scheduler.schedule(() => Promise.resolve(80)); // over budget: parks the queue
+    scheduler.schedule(() => Promise.resolve(1), 0, { idleOnly: true, atDrain: 'first' });
+    await micro();
+    expect(scheduler.perf().aborted).toBe(false);
+    scheduler.schedule(() => Promise.resolve(1));
+    expect(scheduler.perf().aborted).toBe(true);
+  });
+});

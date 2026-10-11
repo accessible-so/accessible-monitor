@@ -291,6 +291,8 @@ function wire(opts: StartOptions, win: Window & Flagged, doc: Document, life: Li
     let finished = reason;
     if (engine.hasDeferredDocumentCost()) {
       await scheduler.drain({ first: true });
+      // A dead scheduler (abort) ran nothing: those rules will never run.
+      if (engine.hasDeferredDocumentCost()) engine.abandonDeferredDocumentCost();
       finished = `${reason}-contrast`;
     }
     if (scheduler.hasWork()) {
