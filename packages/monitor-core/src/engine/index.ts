@@ -262,3 +262,5 @@ export { PAGE_LEVEL_RULES, DOCUMENT_COST_RULES, DOCUMENT_COST_PARTS, DOCUMENT_CO
 export type { AxeLike, AxeNodeLike, AxeViolationLike, AxeResultsLike } from './axe-runner';
 export type { SchedulerApi, SchedulerPerf, SchedulerJob, SchedulerOptions } from './scheduler';
 export type { DirtyTrackerApi, DirtyTrackerOptions } from './dirty';
+export { IdleGate, IDLE_QUIET_MS } from './idle-gate';
+export type { IdleGateApi, IdleGateOptions } from './idle-gate';

@@ -1,0 +1,117 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { IdleGate, IDLE_QUIET_MS } from '../idle-gate';
+
+function setVisibility(state: 'visible' | 'hidden'): void {
+  Object.defineProperty(document, 'visibilityState', { value: state, configurable: true });
+}
+function setReadyState(state: DocumentReadyState): void {
+  Object.defineProperty(document, 'readyState', { value: state, configurable: true });
+}
+
+beforeEach(() => {
+  vi.useFakeTimers();
+  setVisibility('visible');
+  setReadyState('complete');
+});
+afterEach(() => {
+  vi.useRealTimers();
+  setVisibility('visible');
+  setReadyState('complete');
+  delete (navigator as unknown as Record<string, unknown>).scheduling;
+});
+
+describe('IdleGate', () => {
+  it('opens after a second of quiet on a loaded, visible page', () => {
+    const gate = IdleGate({ win: window, doc: document });
+    expect(gate.isOpen()).toBe(false);
+    vi.advanceTimersByTime(IDLE_QUIET_MS - 1);
+    expect(gate.isOpen()).toBe(false);
+    vi.advanceTimersByTime(1);
+    expect(gate.isOpen()).toBe(true);
+    gate.detach();
+  });
+
+  it('treats an already-loaded page as loaded: the engine is injected after load', () => {
+    setReadyState('complete');
+    const gate = IdleGate({ win: window, doc: document });
+    vi.advanceTimersByTime(IDLE_QUIET_MS);
+    expect(gate.isOpen()).toBe(true);
+    gate.detach();
+  });
+
+  it('waits for load on a page still loading', () => {
+    setReadyState('loading');
+    const gate = IdleGate({ win: window, doc: document });
+    vi.advanceTimersByTime(IDLE_QUIET_MS * 3);
+    expect(gate.isOpen()).toBe(false);
+    setReadyState('complete');
+    window.dispatchEvent(new Event('load'));
+    vi.advanceTimersByTime(IDLE_QUIET_MS);
+    expect(gate.isOpen()).toBe(true);
+    gate.detach();
+  });
+
+  it.each(['pointerdown', 'keydown', 'wheel', 'touchstart', 'scroll'])('closes on %s and reopens after quiet', (type) => {
+    const gate = IdleGate({ win: window, doc: document });
+    vi.advanceTimersByTime(IDLE_QUIET_MS);
+    expect(gate.isOpen()).toBe(true);
+    document.dispatchEvent(new Event(type, { bubbles: true }));
+    expect(gate.isOpen()).toBe(false);
+    vi.advanceTimersByTime(IDLE_QUIET_MS - 1);
+    expect(gate.isOpen()).toBe(false);
+    vi.advanceTimersByTime(1);
+    expect(gate.isOpen()).toBe(true);
+    gate.detach();
+  });
+
+  it('is closed while the page is hidden', () => {
+    const gate = IdleGate({ win: window, doc: document });
+    vi.advanceTimersByTime(IDLE_QUIET_MS);
+    setVisibility('hidden');
+    expect(gate.isOpen()).toBe(false);
+    gate.detach();
+  });
+
+  it('is closed while input is pending, where the browser can say so', () => {
+    (navigator as unknown as Record<string, unknown>).scheduling = { isInputPending: () => true };
+    const gate = IdleGate({ win: window, doc: document });
+    vi.advanceTimersByTime(IDLE_QUIET_MS);
+    expect(gate.isOpen()).toBe(false);
+    gate.detach();
+  });
+
+  it('calls each waiter once, when the gate opens', () => {
+    const gate = IdleGate({ win: window, doc: document });
+    const cb = vi.fn();
+    gate.whenOpen(cb);
+    vi.advanceTimersByTime(IDLE_QUIET_MS);
+    expect(cb).toHaveBeenCalledTimes(1);
+    document.dispatchEvent(new Event('keydown', { bubbles: true }));
+    vi.advanceTimersByTime(IDLE_QUIET_MS);
+    expect(cb).toHaveBeenCalledTimes(1);
+    gate.detach();
+  });
+
+  it('calls a waiter on the next tick when already open', () => {
+    const gate = IdleGate({ win: window, doc: document });
+    vi.advanceTimersByTime(IDLE_QUIET_MS);
+    const cb = vi.fn();
+    gate.whenOpen(cb);
+    expect(cb).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(0);
+    expect(cb).toHaveBeenCalledTimes(1);
+    gate.detach();
+  });
+
+  it('never throws into the host from a waiter, and leaves nothing attached after detach', () => {
+    const gate = IdleGate({ win: window, doc: document });
+    gate.whenOpen(() => { throw new Error('boom'); });
+    expect(() => vi.advanceTimersByTime(IDLE_QUIET_MS)).not.toThrow();
+    gate.detach();
+    const cb = vi.fn();
+    gate.whenOpen(cb);
+    vi.advanceTimersByTime(IDLE_QUIET_MS * 2);
+    expect(cb).not.toHaveBeenCalled();
+    expect(gate.isOpen()).toBe(false);
+  });
+});
