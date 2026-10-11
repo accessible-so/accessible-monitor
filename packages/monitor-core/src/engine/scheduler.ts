@@ -168,6 +168,8 @@ export function Scheduler(options: SchedulerOptions): SchedulerApi {
   const gate = options.gate;
   const idleBudgetMs = options.idleBudgetMs ?? IDLE_BUDGET_MS;
   let draining = false;
+  let drainDepth = 0;
+  let drainTail: Promise<void> = Promise.resolve();
   let waitingForWindow = false;
   let idleRuns = 0;
   let tier: PageTier | undefined;
@@ -321,10 +323,20 @@ export function Scheduler(options: SchedulerOptions): SchedulerApi {
     });
   }
 
-  async function drain(drainOptions: { first?: boolean } = {}): Promise<void> {
+  /** Drains run one after another: a second call waits for the first, so axe never runs twice at once. */
+  function drain(drainOptions: { first?: boolean } = {}): Promise<void> {
+    drainDepth++;
+    draining = true;
+    const run = drainTail.then(() => doDrain(drainOptions)).finally(() => {
+      if (--drainDepth === 0) { draining = false; pump(); }
+    });
+    drainTail = run.catch(() => {});
+    return run;
+  }
+
+  async function doDrain(drainOptions: { first?: boolean }): Promise<void> {
     // Whatever an idle callback already started finishes first — axe must
     // never run twice at once — and nothing new starts from one again.
-    draining = true;
     parked = true;
     cancelIdle();
     if (current) await current;
@@ -339,9 +351,10 @@ export function Scheduler(options: SchedulerOptions): SchedulerApi {
       return index === -1 ? undefined : queue.splice(index, 1)[0];
     };
     for (let next = take(); next && !stopped && !aborted; next = take()) {
-      account(await runJob(next.job), true);
+      const job = next.job;
+      current = runJob(job).then((ms) => { current = null; account(ms, true); });
+      await current;
     }
-    draining = false;
     if (!stopped && !aborted && queue.length === 0) {
       parked = false;
       try { options.onPerf?.(perf()); } catch { /* bookkeeping never throws */ }

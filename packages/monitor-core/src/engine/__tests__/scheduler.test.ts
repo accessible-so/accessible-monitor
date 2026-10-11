@@ -395,3 +395,56 @@ describe('Scheduler drain order', () => {
     expect(scheduler.perf().tier).toBe('medium');
   });
 });
+
+describe('Scheduler mid-drain', () => {
+  function heldJobs() {
+    let inFlight = 0;
+    let overlapped = false;
+    let starts = 0;
+    let release!: () => void;
+    const held = async () => {
+      if (inFlight > 0) overlapped = true;
+      inFlight++; starts++;
+      await new Promise<void>((r) => { release = r; });
+      inFlight--;
+      return 10;
+    };
+    return { held, release: () => release(), state: () => ({ overlapped, starts }) };
+  }
+
+  it('counts the last drained job as in flight, and abandon() marks the page unfinished', async () => {
+    const scheduler = Scheduler({ win: idleWindow() });
+    const h = heldJobs();
+    scheduler.schedule(() => Promise.resolve(80)); // parks
+    scheduler.schedule(h.held);
+    await micro();
+    const draining = scheduler.drain();
+    await micro();
+    expect(h.state().starts).toBe(1);
+    expect(scheduler.hasWork()).toBe(true);
+    expect(scheduler.perf().aborted).toBe(true);
+    scheduler.abandon();
+    h.release();
+    await draining;
+    expect(scheduler.perf().aborted).toBe(true);
+  });
+
+  it('a second drain during a held job does not run anything alongside it', async () => {
+    const scheduler = Scheduler({ win: idleWindow() });
+    const h = heldJobs();
+    scheduler.schedule(() => Promise.resolve(80));
+    scheduler.schedule(h.held);
+    scheduler.schedule(h.held);
+    await micro();
+    const first = scheduler.drain();
+    await micro();
+    const second = scheduler.drain();
+    await micro();
+    h.release();
+    await micro();
+    h.release();
+    await Promise.all([first, second]);
+    expect(h.state()).toEqual({ overlapped: false, starts: 2 });
+    expect(scheduler.hasWork()).toBe(false);
+  });
+});
