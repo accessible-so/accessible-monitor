@@ -1,0 +1,22 @@
+---
+import { ClientRouter } from 'astro:transitions';
+const { title } = Astro.props;
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+---
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>{title}</title>
+    <ClientRouter />
+  </head>
+  <body>
+    <nav>
+      <a href={`${base}/`}>Home</a>
+      <a href={`${base}/products/red-shoes`}>Red shoes</a>
+      <a href={`${base}/products/blue-shoes`} id="to-blue">Blue shoes</a>
+      <a href={`${base}/products/featured`}>Featured</a>
+      <a href={`${base}/docs/a/b`}>Docs</a>
+    </nav>
+    <main><slot /></main>
+  </body>
+</html>

@@ -1,0 +1,94 @@
+{
+  "name": "@accessible-so/monitor-core",
+  "version": "0.4.0",
+  "description": "Barrier signature: a stable structural identity for web accessibility defects.",
+  "license": "MIT",
+  "author": "Accessible <support@accessible.so>",
+  "homepage": "https://accessible.so",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/accessible-so/accessible-monitor.git",
+    "directory": "packages/monitor-core"
+  },
+  "bugs": "https://github.com/accessible-so/accessible-monitor/issues",
+  "type": "module",
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./collector": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./signature": {
+      "types": "./dist/signature/index.d.ts",
+      "import": "./dist/signature/index.js",
+      "require": "./dist/signature/index.cjs"
+    },
+    "./signature/source": {
+      "types": "./dist/signature/source.d.ts",
+      "import": "./dist/signature/source.js",
+      "require": "./dist/signature/source.cjs"
+    },
+    "./protocol": {
+      "types": "./dist/protocol/index.d.ts",
+      "import": "./dist/protocol/index.js",
+      "require": "./dist/protocol/index.cjs"
+    },
+    "./redact": {
+      "types": "./dist/redact/index.d.ts",
+      "import": "./dist/redact/index.js",
+      "require": "./dist/redact/index.cjs"
+    }
+  },
+  "typesVersions": {
+    "*": {
+      ".": [
+        "./dist/index.d.ts"
+      ],
+      "collector": [
+        "./dist/index.d.ts"
+      ],
+      "signature": [
+        "./dist/signature/index.d.ts"
+      ],
+      "signature/source": [
+        "./dist/signature/source.d.ts"
+      ],
+      "protocol": [
+        "./dist/protocol/index.d.ts"
+      ],
+      "redact": [
+        "./dist/redact/index.d.ts"
+      ]
+    }
+  },
+  "scripts": {
+    "build": "tsup && node scripts/emit-source.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --exclude '**/*.browser.test.ts'",
+    "test:browser": "vitest run src/signature/__tests__/browser-parity.browser.test.ts"
+  },
+  "dependencies": {
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "jsdom": "^25.0.1",
+    "playwright": "^1.53.2",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

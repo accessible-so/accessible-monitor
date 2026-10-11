@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Mid-size page</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <header>
+      <nav aria-label="Primary">
+        <a href="/">Home</a>
+        <a href="/products.html">Products</a>
+      </nav>
+    </header>
+    <main class="tree">
+      <h1>Mid-size page</h1>
+      <p>About 1,100 elements: too big to scan for contrast while someone is
+         looking at it, small enough to be worth scanning once they stop. The
+         contrast pass here is deferred until the tab is hidden.</p>
+
+      <!-- Found by the ordinary element pass, straight away. -->
+      <p><img src="/img/secret.png"></p>
+      <!-- Found only by the deferred document-cost pass: #999 on #fff. -->
+      <p class="helper">Low contrast helper text.</p>
+
+      <div id="trees"></div>
+    </main>
+    <footer><p class="byline" title="Jane Doe">Photographs by Jane Doe.</p></footer>
+    <script>
+      /* Six sections x (section + h2 + ul + 20 x 9) = 1,098 elements, built at
+         parse time so the page is already this size when the collector starts. */
+      (function () {
+        var html = '';
+        for (var s = 0; s < 6; s++) {
+          html += '<section><h2>Section ' + (s + 1) + '</h2><ul>';
+          for (var i = 0; i < 20; i++) {
+            html += '<li><span>Item ' + (s + 1) + '.' + (i + 1) + '</span><ul>';
+            for (var j = 0; j < 3; j++) html += '<li><span>Leaf ' + (j + 1) + '</span></li>';
+            html += '</ul></li>';
+          }
+          html += '</ul></section>';
+        }
+        document.getElementById('trees').innerHTML = html;
+      })();
+    </script>
+    <script src="/site.js"></script>
+    <script
+      src="/rum/loader.js"
+      data-site-key="acc_rum_0123456789abcdef01234567"
+      data-endpoint="http://localhost:PORT"
+      data-engine="/rum/engine.js"
+    ></script>
+  </body>
+</html>

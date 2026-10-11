@@ -1,0 +1,79 @@
+{
+  "name": "@accessible-so/monitor-next",
+  "version": "0.1.0",
+  "description": "Next.js App Router adapter for Accessible RUM: route-pattern attribution from concrete paths.",
+  "license": "MIT",
+  "author": "Accessible <support@accessible.so>",
+  "homepage": "https://accessible.so",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/accessible-so/accessible-monitor.git",
+    "directory": "packages/monitor-next"
+  },
+  "bugs": "https://github.com/accessible-so/accessible-monitor/issues",
+  "private": false,
+  "type": "module",
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "swc/plugin.wasm",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./config": {
+      "types": "./dist/config.d.ts",
+      "import": "./dist/config.js",
+      "require": "./dist/config.cjs"
+    },
+    "./swc": "./swc/plugin.wasm",
+    "./package.json": "./package.json"
+  },
+  "typesVersions": {
+    "*": {
+      ".": [
+        "./dist/index.d.ts"
+      ],
+      "config": [
+        "./dist/config.d.ts"
+      ]
+    }
+  },
+  "peerDependencies": {
+    "next": ">=13.4 <17",
+    "react": ">=18"
+  },
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run && pnpm size",
+    "size": "size-limit",
+    "typecheck": "tsc --noEmit",
+    "test:browser": "pnpm build && vitest run --config vitest.browser.config.ts",
+    "build:swc": "node ../../scripts/build-swc.mjs"
+  },
+  "dependencies": {
+    "@accessible-so/monitor-core": "workspace:^"
+  },
+  "devDependencies": {
+    "@size-limit/file": "^11.1.6",
+    "@testing-library/react": "^16.0.1",
+    "@types/node": "^22.10.0",
+    "@types/react": "^19",
+    "jsdom": "^25.0.1",
+    "next": "16.3.5",
+    "playwright": "^1.53.2",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "size-limit": "^11.1.6",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

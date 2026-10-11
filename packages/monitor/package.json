@@ -1,0 +1,43 @@
+{
+  "name": "@accessible-so/monitor",
+  "version": "0.4.0",
+  "description": "Script-tag loader and axe-backed engine bundle for Accessible RUM collection.",
+  "license": "MIT",
+  "author": "Accessible <support@accessible.so>",
+  "homepage": "https://accessible.so",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/accessible-so/accessible-monitor.git",
+    "directory": "packages/monitor"
+  },
+  "bugs": "https://github.com/accessible-so/accessible-monitor/issues",
+  "private": false,
+  "files": [
+    "dist",
+    "README.md",
+    "THIRD_PARTY_NOTICES.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "pretest": "pnpm build",
+    "test": "vitest run && pnpm size",
+    "size": "size-limit",
+    "typecheck": "tsc --noEmit",
+    "test:browser": "pnpm build && vitest run --config vitest.browser.config.ts"
+  },
+  "devDependencies": {
+    "@accessible-so/monitor-core": "workspace:*",
+    "@size-limit/file": "^11.1.6",
+    "@types/node": "^22.10.0",
+    "axe-core": "4.13.0",
+    "jsdom": "^25.0.1",
+    "playwright": "^1.53.2",
+    "size-limit": "^11.1.6",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

@@ -1,0 +1,76 @@
+# Every npm release comes from here; nobody publishes from a laptop.
+#
+# Runs the full CI gate first, then publishes each package whose version is not
+# on npm yet, in dependency order (core first). Bump versions, merge, then
+# either publish a GitHub release or run this workflow by hand.
+#
+# Auth: npm trusted publishing (OIDC) — no stored token. The very first publish
+# of a package cannot use it (npm only lets you configure a trusted publisher on
+# a package that exists), so until then the `npm` environment holds a
+# short-lived NPM_TOKEN; delete it once every package has a trusted publisher.
+name: Publish
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    needs: ci
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.1
+
+      # Node 24 ships npm 11, which trusted publishing needs (>= 11.5.1).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm build
+
+      # The wasm the gate built and tested; monitor-next must not ship without it.
+      - uses: actions/download-artifact@v4
+        with:
+          name: swc-plugin-wasm
+          path: packages/monitor-next/swc
+
+      # pnpm pack rewrites workspace:^ to real ranges; npm publish does the
+      # OIDC exchange. Versions already on npm are skipped, so a re-run after a
+      # partial failure picks up where it stopped.
+      - name: Publish new versions
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -s packages/monitor-next/swc/plugin.wasm
+          for dir in monitor-core monitor monitor-next monitor-astro; do
+            name=$(node -p "require('./packages/$dir/package.json').name")
+            version=$(node -p "require('./packages/$dir/package.json').version")
+            if npm view "$name@$version" version >/dev/null 2>&1; then
+              echo "$name@$version already published"
+              continue
+            fi
+            (cd "packages/$dir" && pnpm pack --pack-destination "$RUNNER_TEMP")
+            tarball="$RUNNER_TEMP/$(echo "${name#@}" | tr / -)-$version.tgz"
+            npm publish "$tarball" --access public
+          done

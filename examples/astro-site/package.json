@@ -1,0 +1,16 @@
+{
+  "name": "@accessible-so/example-astro-site",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The Astro fixture the monitor-astro browser suite builds and drives.",
+  "type": "module",
+  "scripts": {
+    "build": "astro build",
+    "dev": "astro dev",
+    "preview": "astro preview"
+  },
+  "dependencies": {
+    "@accessible-so/monitor-astro": "workspace:*",
+    "astro": "7.3.6"
+  }
+}

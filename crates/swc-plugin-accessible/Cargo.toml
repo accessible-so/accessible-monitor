@@ -1,0 +1,30 @@
+[package]
+name = "swc-plugin-accessible"
+version = "0.1.0"
+edition = "2021"
+# swc_core 35's dependency graph does not build on older stables; 1.83 fails to
+# resolve it at all. This turns that into a one-line cargo message.
+rust-version = "1.98"
+description = "SWC plugin that stamps rendered host elements with the component and source that produced them."
+license = "MIT"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+swc_core = { version = "73", features = ["ecma_plugin_transform", "ecma_ast", "ecma_visit", "common"] }
+
+[dev-dependencies]
+swc_core = { version = "73", features = ["swc_ecma_transforms_testing", "testing", "ecma_parser", "ecma_codegen"] }
+testing = "*"
+
+# The wasm ships inside the npm package and is read at every Next.js build, so
+# it is tuned for size rather than speed: the transform itself is trivial, and
+# nearly all of the bytes are swc_core's AST and its host serialization.
+[profile.release]
+lto = true
+opt-level = "s"
+codegen-units = 1
+panic = "abort"
+strip = true

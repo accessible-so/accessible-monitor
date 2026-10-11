@@ -1,0 +1,31 @@
+# @accessible-so/monitor-core
+
+## 0.4.0
+
+- **At most one long task while the visitor is looking, on any device.** The scheduler parks on the first scan run over the 50ms budget instead of halving the chunk size and aborting after three: most of a run's cost is a floor set by the document and the device, so on a slow device each halving was another long task. Parked work is finished when the tab hides (`drain()`), and the page reports `perf.aborted: true` until it is. Chunks are 200 elements (was 400, halving to 100).
+- **The document-cost pass (contrast, target size, link-in-text-block, region) always waits for the tab to hide**, on every page up to 3,000 elements; the immediate tier for pages under 250 elements is gone. It was measured on a fast laptop (~22ms on 120 elements) and is ~76ms at a mid-range phone's speed. `contrastMaxElements` is removed.
+- At tab-hide the collector finishes queued scanning that used to be dropped silently, and drops it with `perf.aborted: true` on `pagehide`. The findings already in hand go out first only when the work ahead is long (a queue, or a page over 250 elements); a small page still sends one beacon.
+- A beacon that said `pending` or `aborted` is followed by the final state even when the work after it found nothing new. Before, a clean deferred contrast pass left the earlier `pending` as the last word, which the server files as rules never checked. `TransportApi.lastSentPerf()` is new.
+- **A click before the scan reaches its element is no longer lost.** With the scan parked on a slow device, a visitor could click a broken button the scan had not reached, and the finding arrived at tab-hide with `i: false`. Unattributed click and key targets are now held (at most 32) and credited when a recorded element contains them. Page-level findings on `<html>` (a missing title or `lang`) no longer swallow every click on the page.
+- The browser budget suite asserts the promise rather than one laptop's timings, and runs under Chromium CPU throttling (`A11Y_PERF_THROTTLE`, default `1,6`); it also passes at 10x.
+
+## 0.3.0
+
+- Adapters may register on `window.__accessibleAdapter`. `startCollector`'s explicit `adapter` option still wins, but a framework component that mounts after a loader has already started the engine can register itself on that slot instead — read lazily on every route-pattern and component lookup, never cached, and never allowed to throw into the collector.
+- Every beacon's `c` (collector version) is now substituted from this package's `package.json` at build time instead of a literal in the source, and the suite asserts the two agree. The literal had been left at `0.2.1` through two releases, and a dashboard that compares it against a `minCollector` minimum was reading a version that no longer existed.
+- The transport's `sendBeacon` Blob now declares `text/plain;charset=UTF-8` instead of `application/json`. The body is still JSON — an ingest must parse it as such regardless of the declared type — but the safelisted content type keeps the request "no-cors", so it is never preflighted and never CORS-checked, which is what makes delivery work against an endpoint that answers a wildcard `Access-Control-Allow-Origin`. The `fetch` fallback is unchanged.
+
+## 0.2.2
+
+- Export the attribute redaction policy and the element-key validator from `./protocol` so servers validate with the same sets the client redacts with.
+
+## 0.2.1
+
+- The ingest schema now parses `findings[].key` and holds it to the structure `elementKeyOf` produces, instead of accepting any string under 4KB — it was the one free-form string on the wire. A long `href` (up to 2,048 characters) no longer rejects the whole beacon: the string branch of the attribute union is as wide as the widest value the redactor can emit, and each key keeps its own limit.
+- `perf.pending` names the rules whose deferred contrast pass has not run yet, so a beacon from a page the visitor is still on says "not yet" rather than nothing; the chunker now scans a container it descended into (with its children excluded) instead of leaving it uncovered; the dirty tracker's debounce is bounded and no longer quadratic; and a detached `spa-focus-loss` observer reports nothing even when a later history wrapper calls through to it.
+
+## 0.2.0
+
+- Added the beacon protocol: zod schemas for every beacon shape, backed by a strict attribute allowlist policy shared with the redaction module.
+- Added sampling, session state, navigation-mode detection, and the transport layer that batches and sends beacons.
+- Added four behavioral observers and an engine with chunked idle-time scanning, per-page time budgets, and a tiered document-cost contrast pass that reports what it skipped via `perf.skipped`.

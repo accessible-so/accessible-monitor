@@ -1,0 +1,10 @@
+# Only the SWC plugin's wasm build reads this. The plugin calls back into its
+# host (`__set_transform_result`, `__lookup_char_pos_source_map_proxy`, …)
+# through plain `extern "C"` blocks, which wasm-ld sees as undefined symbols
+# until it is told they arrive as imports at instantiation time.
+#
+# It lives at the repo root rather than beside the crate because cargo looks for
+# `.cargo/config.toml` in the ancestors of the *working directory*, not of the
+# manifest — and `scripts/build-swc.mjs` runs from here.
+[target.wasm32-wasip1]
+rustflags = ["-C", "link-arg=--allow-undefined"]

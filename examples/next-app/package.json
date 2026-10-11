@@ -1,0 +1,22 @@
+{
+  "name": "@accessible-so/example-next-app",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The Next.js App Router fixture the collector-next browser suite builds and drives.",
+  "scripts": {
+    "build": "next build",
+    "dev": "next dev",
+    "start": "next start"
+  },
+  "dependencies": {
+    "@accessible-so/monitor-next": "workspace:*",
+    "next": "16.3.5",
+    "react": "19.1.0",
+    "react-dom": "19.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/react": "^19",
+    "typescript": "^5.7.2"
+  }
+}

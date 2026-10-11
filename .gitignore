@@ -1,0 +1,19 @@
+node_modules
+dist
+coverage
+*.tgz
+.DS_Store
+
+# Rust build output for the SWC plugin. `plugin.wasm` is a build artefact
+# produced by `node scripts/build-swc.mjs` (and by CI) — it ships in the npm
+# tarball but never in git.
+crates/**/target
+packages/monitor-next/swc/plugin.wasm
+
+# The Next example app is a Playwright fixture: its build output and the
+# `next-env.d.ts` Next regenerates on every build are artefacts, not source.
+# The browser suite's Turbopack build uses NEXT_DIST_DIR=.next-turbopack so
+# its own `next start` can coexist with the webpack build's `.next`.
+examples/next-app/.next
+examples/next-app/.next-turbopack
+examples/next-app/next-env.d.ts

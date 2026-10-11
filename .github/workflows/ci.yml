@@ -1,0 +1,83 @@
+# The gate, run on every push and pull request, in the order a reviewer would:
+# build, then types, then the unit suites, then the browser suites against the
+# bundles the build just produced. The browser step is last because it is the
+# slow one and because it is meaningless without the artefacts above it.
+#
+# The SWC plugin is built first, in its own job: it is a Rust toolchain the
+# JavaScript gate has no other use for, and the browser suites want the wasm in
+# place so their attribution assertions actually run instead of skipping.
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_call:
+
+jobs:
+  swc-plugin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip1
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates/swc-plugin-accessible
+
+      - run: cargo test --manifest-path crates/swc-plugin-accessible/Cargo.toml
+
+      - run: node scripts/build-swc.mjs
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: swc-plugin-wasm
+          path: packages/monitor-next/swc/plugin.wasm
+          if-no-files-found: error
+
+  gate:
+    runs-on: ubuntu-latest
+    needs: swc-plugin
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Build before typecheck: monitor and monitor-next import monitor-core's
+      # declarations from its dist/, which a fresh checkout does not have.
+      - run: pnpm build
+
+      - run: pnpm typecheck
+
+      - run: pnpm test
+
+      # Chromium only: the browser suites drive one engine, and installing the
+      # other two would triple the slowest step for nothing.
+      - run: pnpm --filter @accessible-so/monitor-core exec playwright install --with-deps chromium
+
+      # The browser suites skip their component-attribution assertions when the
+      # wasm is missing. Put it in place so CI runs them.
+      - uses: actions/download-artifact@v4
+        with:
+          name: swc-plugin-wasm
+          path: packages/monitor-next/swc
+
+      # The budget suite runs at the rates in A11Y_PERF_THROTTLE (default 1,6
+      # locally). A shared runner is already several times slower than a
+      # laptop, so it runs at 1x: the assertions hold on any device, and this
+      # runner is the slow one.
+      - run: pnpm test:browser
+        env:
+          A11Y_PERF_THROTTLE: '1'

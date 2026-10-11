@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Big page</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <header>
+      <nav aria-label="Primary">
+        <a href="/">Home</a>
+        <a href="/products.html">Products</a>
+      </nav>
+    </header>
+    <main class="tree">
+      <h1>Big page</h1>
+      <p>Nested lists built at parse time. Twelve sections is over 5,000
+         elements, so the scan engine has to chunk it. <code>?sections=N</code>
+         makes the page smaller, which is how the perf suite finds the size at
+         which the per-task budget stops holding.</p>
+
+      <!-- A handful of real barriers so the page is not merely large. -->
+      <p><img src="/img/secret.png"></p>
+      <p><input type="email"></p>
+      <p class="helper">Low contrast helper text.</p>
+      <p><button class="icon" type="button"><span aria-hidden="true">&#9733;</span></button></p>
+
+      <div id="trees"></div>
+    </main>
+    <footer><p class="byline" title="Jane Doe">Photographs by Jane Doe.</p></footer>
+    <script>
+      /* Built at parse time so the page is already this large when the
+         collector starts: 12 sections x (section + h2 + ul + 40 x 11) = 5,316
+         elements, plus the static shell. */
+      (function () {
+        var m = /[?&]sections=(\d+)/.exec(location.search);
+        var sections = m ? Math.max(0, Math.min(60, +m[1])) : 12;
+        var html = '';
+        for (var s = 0; s < sections; s++) {
+          html += '<section><h2>Section ' + (s + 1) + '</h2><ul>';
+          for (var i = 0; i < 40; i++) {
+            html += '<li><span>Item ' + (s + 1) + '.' + (i + 1) + '</span><ul>';
+            for (var j = 0; j < 4; j++) html += '<li><span>Leaf ' + (j + 1) + '</span></li>';
+            html += '</ul></li>';
+          }
+          html += '</ul></section>';
+        }
+        document.getElementById('trees').innerHTML = html;
+      })();
+    </script>
+    <script src="/site.js"></script>
+    <script
+      src="/rum/loader.js"
+      data-site-key="acc_rum_0123456789abcdef01234567"
+      data-endpoint="http://localhost:PORT"
+      data-engine="/rum/engine.js"
+    ></script>
+  </body>
+</html>

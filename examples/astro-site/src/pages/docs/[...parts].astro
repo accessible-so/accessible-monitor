@@ -1,0 +1,10 @@
+---
+import Page from '../../layouts/Page.astro';
+export function getStaticPaths() {
+  return [{ params: { parts: 'a/b' } }];
+}
+---
+<Page title="Docs">
+  <h1>Docs</h1>
+  <img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" width="40" height="40" />
+</Page>

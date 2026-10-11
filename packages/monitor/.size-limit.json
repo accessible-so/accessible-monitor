@@ -1,0 +1,7 @@
+[
+  {
+    "path": "dist/loader.js",
+    "limit": "2 KB",
+    "gzip": true
+  }
+]

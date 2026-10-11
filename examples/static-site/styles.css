@@ -1,0 +1,48 @@
+/*
+ * Fixture styles. Several rules here are deliberately wrong — they exist so
+ * the collector has real barriers to find in a real browser. Nothing in this
+ * directory is a recommendation.
+ */
+:root { color-scheme: light; }
+
+body {
+  margin: 0;
+  background: #ffffff;
+  color: #1b1b1b;
+  font: 16px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+}
+
+header { border-bottom: 1px solid #e3e3e3; padding: 12px 20px; background: #ffffff; }
+nav a { color: #14507a; margin-right: 16px; }
+main { padding: 20px; max-width: 960px; background: #ffffff; }
+h1 { font-size: 28px; margin: 0 0 4px; }
+
+.grid { list-style: none; display: flex; flex-wrap: wrap; gap: 16px; margin: 20px 0; padding: 0; }
+.card { width: 200px; border: 1px solid #e3e3e3; padding: 12px; background: #ffffff; }
+.card img { display: block; width: 100%; height: 90px; background: #eeeeee; }
+.card h3 { font-size: 16px; margin: 8px 0 4px; }
+
+/* Deliberate 1.4.3 failure: #999 on #fff is about 2.8:1. */
+.more { color: #999999; background: #ffffff; display: inline-block; }
+.helper { color: #999999; background: #ffffff; margin: 4px 0; }
+.byline { color: #555555; background: #ffffff; font-size: 13px; }
+
+.icon { border: 1px solid #cccccc; background: #ffffff; cursor: pointer; }
+.cart { border: 1px solid #14507a; background: #14507a; color: #ffffff; padding: 4px 8px; }
+
+/* Deliberate 2.4.7 failure: focus removed and nothing put back. The border is
+   identical focused and unfocused so there is no "changed border" fallback. */
+#nofocus { border: 1px solid #cccccc; background: #ffffff; padding: 4px 8px; }
+#nofocus:focus, #nofocus:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+  border: 1px solid #cccccc !important;
+}
+
+#dialog { border: 2px solid #1b1b1b; padding: 16px; margin: 16px 0; background: #ffffff; }
+#dialog[hidden] { display: none; }
+#dead { border: 1px dashed #767676; padding: 8px; margin: 16px 0; background: #ffffff; }
+footer { border-top: 1px solid #e3e3e3; padding: 12px 20px; background: #ffffff; }
+
+.tree { font-size: 13px; }
+.tree ul { margin: 0 0 0 12px; padding: 0; list-style: none; }
