@@ -69,10 +69,12 @@ export function IdleGate(options: IdleGateOptions): IdleGateApi {
 
   const onInput = (): void => { try { restartQuiet(); } catch { /* never throws into the host */ } };
   const onLoad = (): void => { try { loaded = true; restartQuiet(); } catch { /* never throws */ } };
+  const onVisibilityChange = (): void => { try { if (!visible()) return; restartQuiet(); } catch { /* never throws into the host */ } };
   const listen = { capture: true, passive: true } as const;
 
   for (const type of INPUT_EVENTS) doc.addEventListener(type, onInput, listen);
   if (!loaded) win.addEventListener('load', onLoad);
+  doc.addEventListener('visibilitychange', onVisibilityChange, listen);
   restartQuiet();
 
   return {
@@ -89,6 +91,7 @@ export function IdleGate(options: IdleGateOptions): IdleGateApi {
       timer = null;
       for (const type of INPUT_EVENTS) doc.removeEventListener(type, onInput, listen);
       win.removeEventListener('load', onLoad);
+      doc.removeEventListener('visibilitychange', onVisibilityChange, listen);
     },
   };
 }

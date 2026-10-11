@@ -114,4 +114,48 @@ describe('IdleGate', () => {
     expect(cb).not.toHaveBeenCalled();
     expect(gate.isOpen()).toBe(false);
   });
+
+  it('restarts the quiet period when the page becomes visible after being hidden', () => {
+    const gate = IdleGate({ win: window, doc: document });
+    vi.advanceTimersByTime(IDLE_QUIET_MS);
+    expect(gate.isOpen()).toBe(true);
+    setVisibility('hidden');
+    expect(gate.isOpen()).toBe(false);
+    setVisibility('visible');
+    document.dispatchEvent(new Event('visibilitychange', { bubbles: true }));
+    // After visibility change, the gate should be closed and waiting for a fresh quiet period
+    expect(gate.isOpen()).toBe(false);
+    vi.advanceTimersByTime(IDLE_QUIET_MS - 1);
+    expect(gate.isOpen()).toBe(false);
+    vi.advanceTimersByTime(1);
+    expect(gate.isOpen()).toBe(true);
+    gate.detach();
+  });
+
+  it('calls a waiter once when registered while hidden, after the page becomes visible and a fresh quiet period passes', () => {
+    const gate = IdleGate({ win: window, doc: document });
+    vi.advanceTimersByTime(IDLE_QUIET_MS);
+    setVisibility('hidden');
+    const cb = vi.fn();
+    gate.whenOpen(cb);
+    expect(cb).not.toHaveBeenCalled();
+    setVisibility('visible');
+    document.dispatchEvent(new Event('visibilitychange', { bubbles: true }));
+    // The visibility change restarts the quiet period, but the waiter is not called yet
+    expect(cb).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(IDLE_QUIET_MS);
+    expect(cb).toHaveBeenCalledTimes(1);
+    gate.detach();
+  });
+
+  it('does not open the gate or call waiters after detach, even when timers advance past the quiet period', () => {
+    const gate = IdleGate({ win: window, doc: document });
+    const cb = vi.fn();
+    gate.whenOpen(cb);
+    // Detach while the timer is still pending
+    gate.detach();
+    vi.advanceTimersByTime(IDLE_QUIET_MS * 2);
+    expect(gate.isOpen()).toBe(false);
+    expect(cb).not.toHaveBeenCalled();
+  });
 });
