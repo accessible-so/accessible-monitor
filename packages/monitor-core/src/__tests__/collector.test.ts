@@ -36,7 +36,7 @@ function fakeAxe(): FakeAxe {
   const calls: { context: Element | Document }[] = [];
   return {
     calls,
-    run(context: Element | Document): Promise<{ violations: AxeViolationLike[] }> {
+    run(context: Element | Document, _options?: unknown): Promise<{ violations: AxeViolationLike[] }> {
       calls.push({ context });
       if (context === document || context === (document as unknown as Element)) {
         const title: AxeViolationLike = {
@@ -782,6 +782,141 @@ describe('the document-cost pass, by page size', () => {
 
     expect(beacons.at(-1)!.perf!.pending).toBeUndefined();
     expect(beacons.at(-1)!.perf!.skipped).toBeUndefined();
+  });
+});
+
+describe('idle windows', () => {
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  function startWith(axe: AxeLike, extra: Record<string, unknown> = {}): { stop(): void } {
+    const handle = startCollector({ siteKey: 'sk_test', endpoint: 'http://ingest.test', config: CONFIG, sessionId: 'sess-w', axe, ...extra });
+    handles.push(handle);
+    return handle;
+  }
+
+  it('runs the document-cost parts while the page is visible once the visitor is idle', async () => {
+    const axe = fakeAxe();
+    let clock = 0;
+    startWith(axe, { idleQuietMs: 20, now: () => (clock += 5) });
+    await settle();
+    await wait(60);
+    await settle();
+    const docRuns = axe.calls.filter((c) => c.context === document).length;
+    expect(docRuns, 'page-level + grid + region while visible').toBe(3);
+  });
+
+  it('a visitor who keeps interacting gets no window', async () => {
+    const axe = fakeAxe();
+    let clock = 0;
+    startWith(axe, { idleQuietMs: 40, now: () => (clock += 5) });
+    for (let i = 0; i < 6; i++) { document.dispatchEvent(new Event('pointerdown', { bubbles: true })); await wait(15); }
+    await settle();
+    expect(axe.calls.filter((c) => c.context === document).length, 'only the page-level run').toBe(1);
+  });
+
+  it('a click during a window task is attributed, and nothing new starts until quiet', async () => {
+    document.body.innerHTML = '<main><img id="a"><button id="x"></button></main>';
+    let release!: () => void;
+    const gateHeld = new Promise<void>((r) => { release = r; });
+    const base = fakeAxe();
+    let docRuns = 0;
+    const axe: AxeLike = {
+      run(context: Element | Document, options?: unknown) {
+        if (context === document) {
+          docRuns++;
+          if (docRuns === 2) return gateHeld.then(() => base.run(context, options as never));
+        }
+        return base.run(context, options as never);
+      },
+    };
+    let clock = 0;
+    startWith(axe, { idleQuietMs: 200, now: () => (clock += 5) });
+    await settle();
+    await wait(300);
+    const img = document.querySelector<HTMLElement>('#a')!;
+    img.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    img.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    release();
+    await settle();
+    expect(docRuns, 'the region part started although input had just landed').toBe(2);
+    await wait(300);
+    await settle();
+    expect(docRuns, 'nothing ran once the visitor was quiet again').toBe(3);
+    setVisibility('hidden');
+    document.dispatchEvent(new Event('visibilitychange'));
+    await settle();
+    const touched = beacons.flatMap((b) => b.findings ?? []).find((f) => f.el.tag === 'img')!;
+    expect(touched.i).toBe(true);
+  });
+
+  it('a tab hidden mid-task waits for it: no part reports checked with an empty result', async () => {
+    let release!: () => void;
+    const held = new Promise<void>((r) => { release = r; });
+    const base = fakeAxe();
+    let inFlight = 0;
+    let overlapped = false;
+    let docRuns = 0;
+    const axe: AxeLike = {
+      async run(context: Element | Document, options?: unknown) {
+        if (inFlight > 0) overlapped = true;
+        inFlight++;
+        try {
+          if (context === document && ++docRuns === 2) await held;
+          return await base.run(context, options as never);
+        } finally { inFlight--; }
+      },
+    };
+    let clock = 0;
+    startWith(axe, { idleQuietMs: 20, now: () => (clock += 5) });
+    await settle();
+    await wait(40);
+    setVisibility('hidden');
+    document.dispatchEvent(new Event('visibilitychange'));
+    release();
+    await settle();
+    expect(overlapped, 'axe ran twice at once').toBe(false);
+    expect(beacons.at(-1)!.perf!.pending).toBeUndefined();
+    expect(beacons.at(-1)!.perf!.skipped).toBeUndefined();
+  });
+
+  it('remembers the slowest tier for the session, and a slow session waits for a window for its first run', async () => {
+    const axe = fakeAxe();
+    let clock = 0;
+    startWith(axe, { now: () => (clock += 60) });
+    await settle();
+    expect(JSON.parse(sessionStorage.getItem('a11y_rum_tier')!)).toBe('slow');
+    for (const h of handles.splice(0)) h.stop();
+    delete (window as unknown as Record<string, unknown>).__accessibleRumStarted;
+    const second = fakeAxe();
+    startWith(second, { idleQuietMs: 10_000 });
+    await settle();
+    expect(second.calls.filter((c) => c.context === document), 'the first run of a known-slow session ran without a window').toHaveLength(0);
+  });
+
+  it('with saveData, never opens a window', async () => {
+    Object.defineProperty(navigator, 'connection', { value: { saveData: true }, configurable: true });
+    try {
+      const axe = fakeAxe();
+      let clock = 0;
+      startWith(axe, { idleQuietMs: 10, now: () => (clock += 5) });
+      await settle();
+      await wait(50);
+      await settle();
+      expect(axe.calls.filter((c) => c.context === document).length).toBe(1);
+    } finally {
+      delete (navigator as unknown as Record<string, unknown>).connection;
+    }
+  });
+
+  it('a route change reports the old view\'s pending parts as skipped before arming the new view', async () => {
+    const axe = fakeAxe();
+    start(axe);
+    await settle();
+    history.pushState({}, '', '/next');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+    await settle();
+    const before = beacons.find((b) => b.perf?.skipped);
+    expect(before?.perf?.skipped, 'the old view\'s gap never went out').toEqual(['color-contrast', 'link-in-text-block', 'target-size', 'region']);
+    expect(before?.routes?.some((r) => r.p === '/next') ?? false, 'the gap was filed under the new view').toBe(false);
   });
 });
 

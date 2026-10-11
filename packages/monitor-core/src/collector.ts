@@ -20,12 +20,14 @@ import { Transport } from './transport/index';
 import { attachObservers } from './observers/index';
 import { DirtyTracker } from './engine/dirty';
 import { Scheduler } from './engine/scheduler';
+import { IdleGate } from './engine/idle-gate';
+import { slower } from './engine/tier';
 import { Engine, countElements } from './engine/index';
 import type { AxeLike, AxeNodeLike, AxeViolationLike } from './engine/axe-runner';
 import { resolveNodeElement } from './engine/axe-runner';
 import type { CollectorAdapter } from './adapter';
 import { resolveAdapter } from './adapter';
-import type { RumConfig, RumContext } from './protocol/types';
+import type { PageTier, RumConfig, RumContext } from './protocol/types';
 
 /**
  * Above this many elements the document-cost pass at tab-hide is long enough
@@ -52,6 +54,8 @@ const STARTED_FLAG = '__accessibleRumStarted';
 const ROUTES_KEY = 'a11y_rum_routes';
 const SESSION_SENT_KEY = 'a11y_rum_session_sent';
 
+const TIER_KEY = 'a11y_rum_tier';
+
 export interface StartOptions {
   siteKey: string;
   endpoint: string;
@@ -61,6 +65,8 @@ export interface StartOptions {
   debug?: boolean;
   axe?: AxeLike;
   now?: () => number;
+  /** Tests only: the idle gate's quiet period. */
+  idleQuietMs?: number;
 }
 
 export interface CollectorHandle {
@@ -142,7 +148,12 @@ function wire(opts: StartOptions, win: Window & Flagged, doc: Document, life: Li
     }
   }
 
-  const scheduler = Scheduler({ win });
+  // The visitor asked for less: no work in idle windows, everything waits for tab-hide as before.
+  let saveData = false;
+  try { saveData = (win.navigator as Navigator & { connection?: { saveData?: boolean } }).connection?.saveData === true; } catch { saveData = false; }
+  const gate = saveData ? undefined : IdleGate({ win, doc, quietMs: opts.idleQuietMs });
+  if (gate) life.add(() => gate.detach());
+  const scheduler = Scheduler({ win, gate });
   // The endpoint is read once, here, at start: the transport is created once
   // and a slot registered later cannot redirect it.
   const transport = Transport({
@@ -172,6 +183,13 @@ function wire(opts: StartOptions, win: Window & Flagged, doc: Document, life: Li
     scheduler,
     now: opts.now,
     debug,
+    firstRunInWindow: store.get<PageTier>(TIER_KEY) === 'slow' && gate !== undefined,
+    onTier: (tier: PageTier) => {
+      try {
+        const kept = slower(store.get<PageTier>(TIER_KEY), tier);
+        if (kept) store.set(TIER_KEY, kept);
+      } catch (err) { debug('tier store failed', err); }
+    },
     onViolation: (v: AxeViolationLike, node: AxeNodeLike) => {
       try {
         const el = resolveNodeElement(doc, node);
@@ -204,6 +222,9 @@ function wire(opts: StartOptions, win: Window & Flagged, doc: Document, life: Li
     },
     onRouteChange: () => {
       try {
+        // The old view's unrun parts go out as skipped, under the old view,
+        // before the new view is queued and re-armed (spec 3.6).
+        if (engine.abandonDeferredDocumentCost()) flush('route');
         reportRoute();
         const root = doc.querySelector('main') ?? doc.body;
         if (root) engine.scanRoots([root]);
@@ -281,8 +302,8 @@ function wire(opts: StartOptions, win: Window & Flagged, doc: Document, life: Li
   }
 
   /**
-   * The work saved for the moment the visitor looks away: the document-cost
-   * pass, then whatever scanning is still queued — parked because the device
+   * The work the idle windows did not get to, run when the visitor looks away:
+   * the document-cost parts left, then whatever scanning is still queued — parked because the device
    * was too slow to scan while they were looking, or simply not reached yet.
    * The contrast findings go out as soon as they exist, before the drain,
    * because a hidden tab can be frozen at any point.
