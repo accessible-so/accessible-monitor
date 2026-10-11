@@ -39,6 +39,17 @@ describe('RumBeaconSchema', () => {
     expect(RumBeaconSchema.safeParse({ ...beacon, perf: { ...perf, pending: ['x'.repeat(65)] } }).success).toBe(false);
   });
 
+  it('accepts an optional page tier and idle-run count, and nothing else new', () => {
+    const perf = { scans: 4, longTasks: 1, maxTaskMs: 82.4, aborted: false };
+    for (const tier of ['fast', 'medium', 'slow']) {
+      expect(RumBeaconSchema.safeParse({ ...beacon, perf: { ...perf, tier } }).success).toBe(true);
+    }
+    expect(RumBeaconSchema.safeParse({ ...beacon, perf: { ...perf, idleRuns: 3 } }).success).toBe(true);
+    expect(RumBeaconSchema.safeParse({ ...beacon, perf: { ...perf, tier: 'turbo' } }).success).toBe(false);
+    expect(RumBeaconSchema.safeParse({ ...beacon, perf: { ...perf, idleRuns: -1 } }).success).toBe(false);
+    expect(RumBeaconSchema.safeParse({ ...beacon, perf: { ...perf, idleRuns: 1.5 } }).success).toBe(false);
+  });
+
   it('rejects raw text or unknown attribute shapes inside elements', () => {
     expect(RumBeaconSchema.safeParse({ ...beacon, findings: [{ ...finding, el: { tag: 'p', attrs: {}, text: 'hello' } }] }).success).toBe(false);
     expect(RumBeaconSchema.safeParse({ ...beacon, findings: [{ ...finding, el: { tag: 'p', attrs: { id: 'x' }, text: null } }] }).success).toBe(false);

@@ -12,6 +12,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   DOCUMENT_COST_NEVER_RUN,
+  DOCUMENT_COST_PARTS,
   DOCUMENT_COST_RULES,
   ELEMENT_TAGS,
   PAGE_LEVEL_RULES,
@@ -79,6 +80,18 @@ describe('the document-cost rule set', () => {
     }
   });
 
+  it('splits into a grid part and a region part that together are the whole set, in order', () => {
+    expect(DOCUMENT_COST_PARTS.map((p) => p.name)).toEqual(['grid', 'region']);
+    expect(DOCUMENT_COST_PARTS.flatMap((p) => p.rules)).toEqual(DOCUMENT_COST_RULES);
+  });
+
+  it('runs one document-cost part by rule id', async () => {
+    const axe = fakeAxe();
+    await runDocumentCost(axe, document, ['region']);
+    expect(axe.calls[0]!.context).toBe(document);
+    expect(axe.calls[0]!.options.runOnly).toEqual({ type: 'rule', values: ['region'] });
+  });
+
   it('never asks axe to run an AAA contrast rule, in any of the three shapes', async () => {
     // `runOnly: { type: 'rule' }` force-enables whatever it names, regardless of
     // the rule's own `enabled` flag — so naming `color-contrast-enhanced` would
@@ -90,7 +103,7 @@ describe('the document-cost rule set', () => {
     const axe = fakeAxe();
     const el = document.createElement('div');
     await runPage(axe, document);
-    await runDocumentCost(axe, document);
+    await runDocumentCost(axe, document, DOCUMENT_COST_RULES);
     await runChunk(axe, { include: [el] });
 
     expect(axe.calls).toHaveLength(3);
@@ -122,7 +135,7 @@ describe('the document-cost rule set', () => {
   it('runs page-level and document-cost rules on the document, by rule id', async () => {
     const axe = fakeAxe();
     await runPage(axe, document);
-    await runDocumentCost(axe, document);
+    await runDocumentCost(axe, document, DOCUMENT_COST_RULES);
 
     expect(axe.calls[0]!.context).toBe(document);
     expect(axe.calls[0]!.options.runOnly).toEqual({ type: 'rule', values: PAGE_LEVEL_RULES });

@@ -1,6 +1,7 @@
 export type NavigationMode = 'keyboard-driven' | 'pointer-driven' | 'mixed' | 'unknown';
 export type Confidence = 'rule' | 'heuristic';
 export type Impact = 'critical' | 'serious' | 'moderate' | 'minor';
+export type PageTier = 'fast' | 'medium' | 'slow';
 
 export interface TextMetrics { length: number; words: number; knownBad: boolean }
 export type AttrValue = string | true | { len: number; words: number } | { refs: number; resolved: number };
@@ -38,6 +39,8 @@ export interface RumBeacon {
     scans: number; longTasks: number; maxTaskMs: number; aborted: boolean;
     skipped?: string[];                 // rules deliberately not run on this page
     pending?: string[];                 // rules whose deferred pass has not run yet
+    tier?: PageTier;                    // this page view's tier
+    idleRuns?: number;                  // tasks run in idle windows
   };
 }
 export interface RumConfig {

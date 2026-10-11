@@ -9,7 +9,7 @@
  */
 import { countElements, splitIntoChunks } from './chunks';
 import type { Chunk } from './chunks';
-import { DOCUMENT_COST_RULES, resolveNodeElement, runChunk, runDocumentCost, runPage } from './axe-runner';
+import { DOCUMENT_COST_PARTS, DOCUMENT_COST_RULES, resolveNodeElement, runChunk, runDocumentCost, runPage } from './axe-runner';
 import type { AxeLike, AxeNodeLike, AxeViolationLike } from './axe-runner';
 import type { SchedulerApi } from './scheduler';
 
@@ -192,7 +192,7 @@ export function Engine(opts: EngineOptions): EngineApi {
       // report the rules as not run.
       deferredRunning = true;
       try {
-        const { violations, ms } = await runDocumentCost(axe, doc, opts.now);
+        const { violations, ms } = await runDocumentCost(axe, doc, DOCUMENT_COST_RULES, opts.now);
         // Abandoned while we were waiting: its rules have already been reported
         // as not run, so do not also report its findings.
         if (!deferredDocumentCost) return;
@@ -258,7 +258,7 @@ export { splitIntoChunks, countElements } from './chunks';
 export type { Chunk } from './chunks';
 export { coalesceRoots, DirtyTracker } from './dirty';
 export { Scheduler } from './scheduler';
-export { PAGE_LEVEL_RULES, DOCUMENT_COST_RULES, DOCUMENT_COST_NEVER_RUN, ELEMENT_TAGS, runPage, runChunk, runDocumentCost, resolveNodeElement } from './axe-runner';
+export { PAGE_LEVEL_RULES, DOCUMENT_COST_RULES, DOCUMENT_COST_PARTS, DOCUMENT_COST_NEVER_RUN, ELEMENT_TAGS, runPage, runChunk, runDocumentCost, resolveNodeElement } from './axe-runner';
 export type { AxeLike, AxeNodeLike, AxeViolationLike, AxeResultsLike } from './axe-runner';
 export type { SchedulerApi, SchedulerPerf, SchedulerJob, SchedulerOptions } from './scheduler';
 export type { DirtyTrackerApi, DirtyTrackerOptions } from './dirty';

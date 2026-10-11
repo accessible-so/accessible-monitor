@@ -165,6 +165,11 @@ export const RumBeaconSchema = z.object({
     // in both lists: it leaves `pending` for `skipped` if the pass is
     // abandoned, and leaves both if it runs.
     pending: z.array(z.string().max(64)).max(16).optional(),
+    // This page view's tier: what fits on this page on this device. See
+    // engine/tier.ts. Absent until the page's first run has been measured.
+    tier: z.enum(['fast', 'medium', 'slow']).optional(),
+    // Tasks run in idle windows while the page was visible. Absent when none.
+    idleRuns: z.number().int().min(0).optional(),
   }).strict().optional(),
 }).strict();
 

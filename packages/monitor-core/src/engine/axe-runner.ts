@@ -83,6 +83,17 @@ export const DOCUMENT_COST_RULES: string[] = [
 ];
 
 /**
+ * The document-cost set as two runs. The first three share axe's spatial grid
+ * of the page, so they cost one grid build together; `region` walks the
+ * document instead (methodology §4.1: ~75 ms vs ~145 ms on the 5,345-element
+ * fixture). Two shorter tasks fit idle windows one long task does not.
+ */
+export const DOCUMENT_COST_PARTS: readonly { name: 'grid' | 'region'; rules: string[] }[] = [
+  { name: 'grid', rules: ['color-contrast', 'link-in-text-block', 'target-size'] },
+  { name: 'region', rules: ['region'] },
+];
+
+/**
  * Same cost shape, never run.
  *
  * `color-contrast-enhanced` is the AAA sibling of `color-contrast` (1.4.6). It
@@ -146,14 +157,12 @@ export function runPage(axe: AxeLike, doc: Document, clock?: () => number): Prom
 }
 
 /**
- * The document-cost rules, once per page, on the whole document. Only ever
- * scheduled when the engine has decided the document is small enough to
- * afford it; see `Engine`'s `contrastMaxElements`.
+ * Some or all of the document-cost rules, on the whole document. See DOCUMENT_COST_PARTS.
  */
-export function runDocumentCost(axe: AxeLike, doc: Document, clock?: () => number): Promise<RunResult> {
+export function runDocumentCost(axe: AxeLike, doc: Document, rules: string[], clock?: () => number): Promise<RunResult> {
   return timed(() =>
     axe.run(doc, {
-      runOnly: { type: 'rule', values: DOCUMENT_COST_RULES },
+      runOnly: { type: 'rule', values: rules },
       resultTypes: ['violations'],
       elementRef: true,
       iframes: false,
