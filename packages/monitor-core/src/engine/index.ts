@@ -264,3 +264,5 @@ export type { SchedulerApi, SchedulerPerf, SchedulerJob, SchedulerOptions } from
 export type { DirtyTrackerApi, DirtyTrackerOptions } from './dirty';
 export { IdleGate, IDLE_QUIET_MS } from './idle-gate';
 export type { IdleGateApi, IdleGateOptions } from './idle-gate';
+export { INITIAL_RATIOS, predictPartMs, pageTier, slower } from './tier';
+export type { DocCostPartName } from './tier';
