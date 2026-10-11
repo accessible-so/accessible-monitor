@@ -224,6 +224,7 @@ function wire(opts: StartOptions, win: Window & Flagged, doc: Document, life: Li
       try {
         // The old view's unrun parts go out as skipped, under the old view,
         // before the new view is queued and re-armed (spec 3.6).
+        // If this beacon fails to send, the old view's gap is lost (the re-arm moves the rules back to pending): accepted, rare.
         if (engine.abandonDeferredDocumentCost()) flush('route');
         reportRoute();
         const root = doc.querySelector('main') ?? doc.body;
@@ -345,10 +346,10 @@ function wire(opts: StartOptions, win: Window & Flagged, doc: Document, life: Li
   /**
    * One way out, whoever calls it.
    *
-   * The contrast pass, and on a slow device the rest of the scanning, was
-   * deliberately left until the visitor stopped looking, and hiding the tab is
-   * that moment — and the last one. But a hidden tab may be frozen or discarded at any point, so the
-   * ordinary findings go out *first*, before the pass is started: losing the
+   * Whatever the idle windows did not get to (document-cost parts, and on a
+   * slow device the rest of the scanning) runs now: hiding the tab is the last
+   * moment there is. But a hidden tab may be frozen or discarded at any point, so the
+   * ordinary findings go out *first*, before that work is started: losing the
    * contrast findings is a great deal better than losing the whole beacon
    * because a 250ms scan was in front of it. The contrast findings then follow
    * as their own second beacon.

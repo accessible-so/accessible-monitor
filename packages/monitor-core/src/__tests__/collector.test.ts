@@ -796,7 +796,7 @@ describe('idle windows', () => {
   it('runs the document-cost parts while the page is visible once the visitor is idle', async () => {
     const axe = fakeAxe();
     let clock = 0;
-    startWith(axe, { idleQuietMs: 20, now: () => (clock += 5) });
+    startWith(axe, { idleQuietMs: 20, now: () => (clock += 5) }); // every run measures 5 ms: all parts fit
     await settle();
     await wait(60);
     await settle();
@@ -807,7 +807,7 @@ describe('idle windows', () => {
   it('a visitor who keeps interacting gets no window', async () => {
     const axe = fakeAxe();
     let clock = 0;
-    startWith(axe, { idleQuietMs: 40, now: () => (clock += 5) });
+    startWith(axe, { idleQuietMs: 150, now: () => (clock += 5) }); // inputs every 15 ms: a late timer cannot open a window
     for (let i = 0; i < 6; i++) { document.dispatchEvent(new Event('pointerdown', { bubbles: true })); await wait(15); }
     await settle();
     expect(axe.calls.filter((c) => c.context === document).length, 'only the page-level run').toBe(1);
@@ -823,6 +823,7 @@ describe('idle windows', () => {
       run(context: Element | Document, options?: unknown) {
         if (context === document) {
           docRuns++;
+          // Hold the grid part (the second document run) until released.
           if (docRuns === 2) return gateHeld.then(() => base.run(context, options as never));
         }
         return base.run(context, options as never);
@@ -831,9 +832,9 @@ describe('idle windows', () => {
     let clock = 0;
     startWith(axe, { idleQuietMs: 200, now: () => (clock += 5) });
     await settle();
-    await wait(300);
+    await wait(300); // window opens, the grid part starts and is held
     const img = document.querySelector<HTMLElement>('#a')!;
-    img.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    img.dispatchEvent(new Event('pointerdown', { bubbles: true })); // what closes the gate
     img.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     release();
     await settle();
@@ -866,9 +867,10 @@ describe('idle windows', () => {
       },
     };
     let clock = 0;
-    startWith(axe, { idleQuietMs: 20, now: () => (clock += 5) });
+    startWith(axe, { idleQuietMs: 100, now: () => (clock += 5) });
     await settle();
-    await wait(40);
+    await wait(200); // window opens; the grid part (second document run) is held
+    expect(docRuns, 'the grid part was not in flight when the tab hid').toBe(2);
     setVisibility('hidden');
     document.dispatchEvent(new Event('visibilitychange'));
     release();
@@ -881,14 +883,15 @@ describe('idle windows', () => {
   it('remembers the slowest tier for the session, and a slow session waits for a window for its first run', async () => {
     const axe = fakeAxe();
     let clock = 0;
-    startWith(axe, { now: () => (clock += 60) });
+    startWith(axe, { now: () => (clock += 60) }); // 60 ms first run: slow
     await settle();
     expect(JSON.parse(sessionStorage.getItem('a11y_rum_tier')!)).toBe('slow');
     for (const h of handles.splice(0)) h.stop();
     delete (window as unknown as Record<string, unknown>).__accessibleRumStarted;
     const second = fakeAxe();
-    startWith(second, { idleQuietMs: 10_000 });
+    startWith(second, { idleQuietMs: 10_000 }); // no window will open
     await settle();
+    // Chunk scans may run (they park after one long task as always); the page-level run may not.
     expect(second.calls.filter((c) => c.context === document), 'the first run of a known-slow session ran without a window').toHaveLength(0);
   });
 
