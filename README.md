@@ -465,4 +465,4 @@ see [`THIRD_PARTY_NOTICES.md`](./packages/monitor/THIRD_PARTY_NOTICES.md).
 
 ## Trademarks
 
-"Accessible" and the Accessible logo are trademarks of L5 Ventures. The license covers the code, not the name: a fork or redistribution may not be called Accessible or presented as ours.
+"Accessible" and the Accessible logo are trademarks of L5 Ventures LLC, doing business as Accessible. The license covers the code, not the name: a fork or redistribution may not be called Accessible or presented as ours.

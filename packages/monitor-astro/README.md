@@ -86,4 +86,4 @@ The framework-adapter contract is in [docs/adapters.md](../../docs/adapters.md).
 
 MIT.
 
-"Accessible" and the Accessible logo are trademarks of L5 Ventures. The license covers the code, not the name: a fork or redistribution may not be called Accessible or presented as ours.
+"Accessible" and the Accessible logo are trademarks of L5 Ventures LLC, doing business as Accessible. The license covers the code, not the name: a fork or redistribution may not be called Accessible or presented as ours.
