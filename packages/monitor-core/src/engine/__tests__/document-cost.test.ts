@@ -520,4 +520,39 @@ describe('Engine document-cost scheduling', () => {
     expect(scheduler.perf().skipped).toEqual(DOCUMENT_COST_RULES);
     expect(scheduler.perf().pending).toBeUndefined();
   });
+
+  it('treats a first run measured at 0 ms as unmeasured: no part fits a window, and the tier is not fast', async () => {
+    document.body.innerHTML = '<main><p>small</p></main>';
+    const { axe, now } = costedAxe({ page: 0, grid: 0, region: 0, chunk: 0 });
+    const gate = manualGate();
+    const { engine, scheduler } = build(axe, { gate, now });
+    engine.scanFull();
+    await micro();
+    gate.open();
+    await micro();
+    expect(documentCostRuns(axe)).toHaveLength(0);
+    expect(scheduler.perf().pending).toEqual(DOCUMENT_COST_RULES);
+    expect(scheduler.perf().tier).not.toBe('fast');
+  });
+
+  it('reports the rules of a part whose axe.run rejected as skipped, not checked', async () => {
+    document.body.innerHTML = '<main><p>small</p></main>';
+    const base = fakeAxe();
+    const axe = {
+      calls: base.calls,
+      run(context: Element | Document, options: Parameters<AxeLike['run']>[1]) {
+        const runOnly = (options as Call['options'] | undefined)?.runOnly;
+        if (runOnly?.values === DOCUMENT_COST_PARTS[0]!.rules) return Promise.reject(new Error('boom'));
+        return base.run(context, options);
+      },
+    };
+    const { engine, scheduler } = build(axe);
+    engine.scanFull();
+    await micro();
+    await scheduler.drain({ first: true });
+    const perf = scheduler.perf();
+    for (const r of DOCUMENT_COST_PARTS[0]!.rules) expect(perf.skipped).toContain(r);
+    for (const r of DOCUMENT_COST_PARTS[0]!.rules) expect(perf.pending ?? []).not.toContain(r);
+    for (const r of DOCUMENT_COST_PARTS[1]!.rules) expect(perf.skipped ?? []).not.toContain(r);
+  });
 });

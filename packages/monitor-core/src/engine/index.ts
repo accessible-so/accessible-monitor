@@ -78,7 +78,9 @@ export function Engine(opts: EngineOptions): EngineApi {
   let docGen = 0;
 
   const chunkPredict = (): number | null => lastChunkMs ?? firstRunMs;
-  const partPredict = (part: DocCostPartName): number | null => predictPartMs(firstRunMs, armedElements, PART_COST[part], learned[part]);
+  // An unmeasured page (no first run yet, or a timer too coarse to read) cannot promise a part fits a window.
+  const partPredict = (part: DocCostPartName): number | null =>
+    firstRunMs === null || firstRunMs <= 0 ? Infinity : predictPartMs(firstRunMs, armedElements, PART_COST[part], learned[part]);
 
   function debug(...args: unknown[]): void {
     try { opts.debug?.(...args); } catch { /* logging never breaks a scan */ }
@@ -188,9 +190,10 @@ export function Engine(opts: EngineOptions): EngineApi {
       scheduler.defer(part.rules);
       scheduler.schedule(async () => {
         if (stopped || gen !== docGen || !pendingParts.has(part.name)) return 0;
-        const { violations, ms } = await runDocumentCost(axe, doc, part.rules, opts.now);
+        const { violations, ms, ok } = await runDocumentCost(axe, doc, part.rules, opts.now);
         // Abandoned or re-armed while it ran: its rules were already reported.
         if (gen !== docGen || !pendingParts.delete(part.name)) return ms;
+        if (!ok) { scheduler.skip(part.rules); return ms; }
         scheduler.unskip(part.rules);
         const predictedMs = partPredict(part.name);
         const modelMs = firstRunMs !== null && firstRunMs > 0 ? modelPartMs(firstRunMs, armedElements, PART_COST[part.name]) : 0;

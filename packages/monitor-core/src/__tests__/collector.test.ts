@@ -835,6 +835,7 @@ describe('idle windows', () => {
     await wait(300); // window opens, the grid part starts and is held
     const img = document.querySelector<HTMLElement>('#a')!;
     img.dispatchEvent(new Event('pointerdown', { bubbles: true })); // what closes the gate
+    img.dispatchEvent(new Event('pointerup', { bubbles: true })); // a tap: released at once, so quiet counts from here
     img.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     release();
     await settle();

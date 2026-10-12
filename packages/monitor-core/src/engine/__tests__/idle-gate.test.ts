@@ -51,7 +51,7 @@ describe('IdleGate', () => {
     gate.detach();
   });
 
-  it.each(['pointerdown', 'keydown', 'wheel', 'touchstart', 'scroll'])('closes on %s and reopens after quiet', (type) => {
+  it.each(['keydown', 'wheel', 'touchstart', 'scroll'])('closes on %s and reopens after quiet', (type) => {
     const gate = IdleGate({ win: window, doc: document });
     vi.advanceTimersByTime(IDLE_QUIET_MS);
     expect(gate.isOpen()).toBe(true);
@@ -157,5 +157,51 @@ describe('IdleGate', () => {
     vi.advanceTimersByTime(IDLE_QUIET_MS * 2);
     expect(gate.isOpen()).toBe(false);
     expect(cb).not.toHaveBeenCalled();
+  });
+
+  describe('a pressed pointer', () => {
+    const press = (): void => { document.dispatchEvent(new Event('pointerdown', { bubbles: true })); };
+
+    it('keeps the gate closed for as long as the press is held', () => {
+      const gate = IdleGate({ win: window, doc: document });
+      vi.advanceTimersByTime(IDLE_QUIET_MS);
+      press();
+      vi.advanceTimersByTime(3000);
+      expect(gate.isOpen()).toBe(false);
+      gate.detach();
+    });
+
+    it.each(['pointerup', 'pointercancel'])('opens a full quiet period after %s, not before', (type) => {
+      const gate = IdleGate({ win: window, doc: document });
+      press();
+      vi.advanceTimersByTime(3000);
+      document.dispatchEvent(new Event(type, { bubbles: true }));
+      vi.advanceTimersByTime(IDLE_QUIET_MS - 1);
+      expect(gate.isOpen()).toBe(false);
+      vi.advanceTimersByTime(1);
+      expect(gate.isOpen()).toBe(true);
+      gate.detach();
+    });
+
+    it('is cleared by window blur, so a lost release cannot stick', () => {
+      const gate = IdleGate({ win: window, doc: document });
+      press();
+      window.dispatchEvent(new Event('blur'));
+      vi.advanceTimersByTime(IDLE_QUIET_MS);
+      expect(gate.isOpen()).toBe(true);
+      gate.detach();
+    });
+
+    it('is cleared when the page is hidden', () => {
+      const gate = IdleGate({ win: window, doc: document });
+      press();
+      setVisibility('hidden');
+      document.dispatchEvent(new Event('visibilitychange'));
+      setVisibility('visible');
+      document.dispatchEvent(new Event('visibilitychange'));
+      vi.advanceTimersByTime(IDLE_QUIET_MS);
+      expect(gate.isOpen()).toBe(true);
+      gate.detach();
+    });
   });
 });

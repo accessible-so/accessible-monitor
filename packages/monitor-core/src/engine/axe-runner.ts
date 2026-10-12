@@ -120,6 +120,8 @@ for (const rule of [...PAGE_LEVEL_RULES, ...DOCUMENT_COST_RULES, ...DOCUMENT_COS
 export interface RunResult {
   violations: AxeViolationLike[];
   ms: number;
+  /** False when axe.run rejected: the violations are empty because nothing was checked. */
+  ok: boolean;
 }
 
 function nowMs(): number {
@@ -136,10 +138,10 @@ async function timed(run: () => Promise<AxeResultsLike>, clock?: () => number): 
   const started = now();
   try {
     const results = await run();
-    return { violations: Array.isArray(results?.violations) ? results.violations : [], ms: now() - started };
+    return { violations: Array.isArray(results?.violations) ? results.violations : [], ms: now() - started, ok: true };
   } catch {
     // A rule that throws inside axe must not stop the page or the engine.
-    return { violations: [], ms: now() - started };
+    return { violations: [], ms: now() - started, ok: false };
   }
 }
 

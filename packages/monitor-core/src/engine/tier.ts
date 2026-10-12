@@ -49,6 +49,7 @@ export function pageTier(
   activeBudgetMs = ACTIVE_BUDGET_MS,
   idleBudgetMs = IDLE_BUDGET_MS,
 ): PageTier {
+  if (firstRunMs <= 0) return 'medium'; // coarsened timers: unmeasured, never 'fast'
   if (firstRunMs > activeBudgetMs) return 'slow';
   const fits = (Object.keys(costs) as DocCostPartName[]).every((p) => modelPartMs(firstRunMs, elements, costs[p]) <= idleBudgetMs);
   return fits ? 'fast' : 'medium';

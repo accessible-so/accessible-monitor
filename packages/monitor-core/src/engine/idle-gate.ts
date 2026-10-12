@@ -11,7 +11,7 @@
  */
 export const IDLE_QUIET_MS = 1000;
 
-const INPUT_EVENTS = ['pointerdown', 'keydown', 'wheel', 'touchstart', 'scroll'] as const;
+const INPUT_EVENTS = ['keydown', 'wheel', 'touchstart', 'scroll'] as const;
 
 export interface IdleGateApi {
   isOpen(): boolean;
@@ -32,6 +32,8 @@ export function IdleGate(options: IdleGateOptions): IdleGateApi {
   const quietMs = options.quietMs ?? IDLE_QUIET_MS;
   let loaded = doc.readyState === 'complete';
   let quiet = false;
+  /** A pointer is down: a drag or hold is interaction even when nothing scrolls. */
+  let pressed = false;
   let detached = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let waiters: (() => void)[] = [];
@@ -45,7 +47,7 @@ export function IdleGate(options: IdleGateOptions): IdleGateApi {
   }
 
   function isOpen(): boolean {
-    return !detached && loaded && quiet && visible() && !inputPending();
+    return !detached && loaded && quiet && !pressed && visible() && !inputPending();
   }
 
   function release(): void {
@@ -68,11 +70,17 @@ export function IdleGate(options: IdleGateOptions): IdleGateApi {
   }
 
   const onInput = (): void => { try { restartQuiet(); } catch { /* never throws into the host */ } };
+  const onDown = (): void => { try { pressed = true; restartQuiet(); } catch { /* never throws into the host */ } };
+  const onRelease = (): void => { try { pressed = false; restartQuiet(); } catch { /* never throws into the host */ } };
   const onLoad = (): void => { try { loaded = true; restartQuiet(); } catch { /* never throws */ } };
-  const onVisibilityChange = (): void => { try { if (!visible()) return; restartQuiet(); } catch { /* never throws into the host */ } };
+  const onVisibilityChange = (): void => { try { if (!visible()) { pressed = false; return; } restartQuiet(); } catch { /* never throws into the host */ } };
   const listen = { capture: true, passive: true } as const;
 
   for (const type of INPUT_EVENTS) doc.addEventListener(type, onInput, listen);
+  doc.addEventListener('pointerdown', onDown, listen);
+  doc.addEventListener('pointerup', onRelease, listen);
+  doc.addEventListener('pointercancel', onRelease, listen);
+  win.addEventListener('blur', onRelease, listen);
   if (!loaded) win.addEventListener('load', onLoad);
   doc.addEventListener('visibilitychange', onVisibilityChange, listen);
   restartQuiet();
@@ -90,6 +98,10 @@ export function IdleGate(options: IdleGateOptions): IdleGateApi {
       if (timer !== null) clearTimeout(timer);
       timer = null;
       for (const type of INPUT_EVENTS) doc.removeEventListener(type, onInput, listen);
+      doc.removeEventListener('pointerdown', onDown, listen);
+      doc.removeEventListener('pointerup', onRelease, listen);
+      doc.removeEventListener('pointercancel', onRelease, listen);
+      win.removeEventListener('blur', onRelease, listen);
       win.removeEventListener('load', onLoad);
       doc.removeEventListener('visibilitychange', onVisibilityChange, listen);
     },
