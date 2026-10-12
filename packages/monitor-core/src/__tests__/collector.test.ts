@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { COLLECTOR_VERSION, startCollector } from '../index';
+import { perfChanged } from '../collector';
 import type { AxeLike, AxeViolationLike } from '../index';
 import { DOCUMENT_COST_PARTS, DOCUMENT_COST_RULES } from '../engine/axe-runner';
 import type { RumBeacon, RumConfig } from '../protocol/types';
@@ -1058,5 +1059,18 @@ describe('the reported collector version', () => {
 
     expect(beacons.length).toBeGreaterThan(0);
     for (const beacon of beacons) expect(beacon.c).toBe(version);
+  });
+});
+
+describe('perfChanged', () => {
+  const clean = { scans: 3, longTasks: 0, maxTaskMs: 5, aborted: false };
+  it('is true when aborted flips either way, or a pending pass finished', () => {
+    expect(perfChanged(clean, { ...clean, aborted: true }), 'a run failed after the last beacon').toBe(true);
+    expect(perfChanged({ ...clean, aborted: true }, clean)).toBe(true);
+    expect(perfChanged({ ...clean, pending: ['region'] }, clean)).toBe(true);
+  });
+  it('is false when nothing relevant changed, so no beacon is spent', () => {
+    expect(perfChanged(clean, { ...clean, scans: 9 })).toBe(false);
+    expect(perfChanged({ ...clean, aborted: true }, { ...clean, aborted: true })).toBe(false);
   });
 });

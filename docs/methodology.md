@@ -252,8 +252,9 @@ measures nothing: the page stays uncalibrated (no `perf.tier`), its parts are
 predicted as unbounded so they never start in a window, and they run, or are dropped,
 when the tab hides. Any failed scan run, the page-level run or a chunk, also leaves
 `perf.aborted` true for the rest of the page: its rules were not checked, so the
-page is not reported clean. `learned` also feeds the tier, so `fast` means every
-part's actual prediction fits a window.
+page is not reported clean. A failed page-level run is reported only that way:
+its 23 rules are not listed in `skipped`, because the protocol caps that list at
+16, so per-rule views do not show them as unchecked and `perfAborted` is the signal.
 
     predicted ms = firstRunMs × (base + perThousand × elements / 1000) × learned
 
@@ -282,7 +283,9 @@ and, after a part runs, becomes the larger of itself and `actualMs / modelMs`,
 so a site that overruns once is not under-predicted again for the rest of the
 session. It has no upper cap: a larger multiplier only defers work to tab-hide.
 A window task that nonetheless runs over 150 ms is counted in
-`perf.windowOverruns` (only tasks that had a prediction count), so the coefficients can be raised from field data.
+`perf.windowOverruns` (only tasks that had a prediction count), so the
+coefficients can be raised from field data. `learned` also feeds the tier, so
+`fast` means every part's actual prediction fits a window.
 
 The **tier** names what the predictions said, per view (`perf.tier`):
 

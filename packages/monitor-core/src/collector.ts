@@ -20,6 +20,7 @@ import { Transport } from './transport/index';
 import { attachObservers } from './observers/index';
 import { DirtyTracker } from './engine/dirty';
 import { Scheduler } from './engine/scheduler';
+import type { SchedulerPerf } from './engine/scheduler';
 import { IdleGate } from './engine/idle-gate';
 import { slower } from './engine/tier';
 import type { DocCostPartName } from './engine/tier';
@@ -57,6 +58,11 @@ const SESSION_SENT_KEY = 'a11y_rum_session_sent';
 
 const TIER_KEY = 'a11y_rum_tier';
 const LEARNED_KEY = 'a11y_rum_learned';
+
+/** Whether the last beacon's scan state is out of date: `aborted` flipped either way, or a pending pass finished. */
+export function perfChanged(last: SchedulerPerf, now: SchedulerPerf): boolean {
+  return last.aborted !== now.aborted || (last.pending?.length ?? 0) > (now.pending?.length ?? 0);
+}
 
 export interface StartOptions {
   siteKey: string;
@@ -310,7 +316,7 @@ function wire(opts: StartOptions, win: Window & Flagged, doc: Document, life: Li
       const last = transport.lastSentPerf();
       if (!last) return;
       const now = scheduler.perf();
-      const stale = (last.aborted && !now.aborted) || (last.pending?.length ?? 0) > (now.pending?.length ?? 0);
+      const stale = perfChanged(last, now);
       if (stale) transport.setPerf(now);
     } catch (err) {
       debug('settlePerf failed', err);
