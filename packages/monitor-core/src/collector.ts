@@ -195,12 +195,14 @@ function wire(opts: StartOptions, win: Window & Flagged, doc: Document, life: Li
     learned: store.get<Partial<Record<DocCostPartName, number>>>(LEARNED_KEY) ?? undefined,
     onLearned: (learned) => {
       try {
-        // The largest multiplier any page of the session has needed: a larger one only defers work to tab-hide.
+        // The largest measured ratio any page of the session has produced: a heavier page raises it, a lighter one never lowers it.
         const stored = store.get<Partial<Record<DocCostPartName, number>>>(LEARNED_KEY) ?? {};
         const merged: Record<string, number> = {};
         for (const part of Object.keys(learned) as DocCostPartName[]) {
+          const mine = learned[part];
+          if (mine === undefined) continue;
           const old = stored[part];
-          merged[part] = typeof old === 'number' && Number.isFinite(old) ? Math.max(old, learned[part]) : learned[part];
+          merged[part] = typeof old === 'number' && Number.isFinite(old) ? Math.max(old, mine) : mine;
         }
         store.set(LEARNED_KEY, merged);
       } catch (err) { debug('learned store failed', err); }

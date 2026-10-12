@@ -256,7 +256,7 @@ page is not reported clean. A failed page-level run is reported only that way:
 its 23 rules are not listed in `skipped`, because the protocol caps that list at
 16, so per-rule views do not show them as unchecked and `perfAborted` is the signal.
 
-    predicted ms = firstRunMs × (base + perThousand × elements / 1000) × learned
+    predicted ms = firstRunMs × (base + perThousand × elements / 1000) × factor
 
 | Part | base | perThousand |
 |---|---|---|
@@ -277,15 +277,35 @@ the visitor, an overestimate only defers work to tab-hide.
 
 `elements` is the body's count when the view was armed, and the tier is
 recomputed from it on each client-side route change; the first run is not
-repeated. `learned` persists across views and across the pages of a session
-(kept in `sessionStorage`, the larger value per part winning). It starts at 1
-and, after a part runs, becomes the larger of itself and `actualMs / modelMs`,
-so a site that overruns once is not under-predicted again for the rest of the
-session. It has no upper cap: a larger multiplier only defers work to tab-hide.
-A window task that nonetheless runs over 150 ms is counted in
-`perf.windowOverruns` (only tasks that had a prediction count), so the
-coefficients can be raised from field data. `learned` also feeds the tier, so
-`fast` means every part's actual prediction fits a window.
+repeated.
+
+**Measured ratio.** The coefficients were fitted to synthetic fixtures that are
+heavier per element than real pages (on one real site, 446 elements and a 21.8 ms
+first run, the grid part was predicted at 211 ms and cost 90 ms or less). Left as
+a ceiling, the model would keep such a site's contrast and landmark checks out of
+every idle window, so they would never run while the visitor reads. A site proves
+it is cheaper with one measured run. After a part completes (`ok`) in an idle
+window or at tab-hide, the ratio `actualMs / modelMs` (the model with no factor)
+is recorded, and the part's factor becomes:
+
+- no measurement yet, on this page or earlier in the session: `1`, the pure model.
+  The first page of a session always uses the pure model;
+- otherwise `max(0.25, measured) × 1.25`, where `measured` is the **largest**
+  ratio seen for that part this session (`LEARNED_FLOOR`, `LEARNED_HEADROOM`).
+  A heavier page raises it; it never falls below the highest measurement. The
+  floor stops one lucky run making a part nearly free; the headroom covers a next
+  page a little heavier than the one measured.
+
+The maximum persists across views and across the pages of a session (kept in
+`sessionStorage`, the larger value per part winning; a stored value is used only
+if finite and above 0). The same factor feeds the tier, so `fast` means every
+part's actual prediction fits a window.
+
+The risk, stated plainly: the factor can be below 1, so a later page that is
+heavier per element than the one measured can be under-predicted and overrun a
+window until its own run raises the maximum. A window task that runs over 150 ms
+is counted in `perf.windowOverruns` (only tasks that had a prediction count), so
+this shows in field data and the coefficients or headroom can be raised.
 
 The **tier** names what the predictions said, per view (`perf.tier`):
 
@@ -374,7 +394,7 @@ At 1x the grid part cost 51 ms on 112 elements (predicted 45) and 97 ms on 412
 (predicted 123); `region` cost 70 ms on 5,338 elements (predicted 128). The
 model under-predicted on two 1x pages: the grid part on `/` (51 ms against
 45 predicted, 13% over) and `region` on `/mid.html` (21 ms against 16, 28%
-over). The `learned` multiplier corrects each after its first run (for the
+over). The measured ratio replaces the model for each part after its first run (for the
 rest of the session), and every part that ran while the visitor was interacting
 stayed within the 180 ms bound.
 

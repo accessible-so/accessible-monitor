@@ -390,6 +390,8 @@ describe('startCollector', () => {
 
   it('detaches everything when the page hides: no more scans, no more timers', async () => {
     vi.useFakeTimers();
+    // jsdom schedules a timer for every Storage write under fake timers; it is not ours to count.
+    const storageWrite = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {});
     const axe = fakeAxe();
     start(axe);
     await micro();
@@ -421,6 +423,7 @@ describe('startCollector', () => {
     await micro();
     expect(axe.calls.length).toBe(beforeHide + 2);
     expect(beacons.length).toBe(1);
+    storageWrite.mockRestore();
 
     // A click no longer reaches us either, and a second halt is a no-op.
     document.querySelector<HTMLElement>('#a')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -816,11 +819,11 @@ describe('idle windows', () => {
     await settle();
     expect(regionRuns(first), 'the first page runs region in its window').toBe(1);
     const learned = JSON.parse(sessionStorage.getItem('a11y_rum_learned')!) as Record<string, number>;
-    expect(learned.region, 'region overran its model').toBeGreaterThan(1);
+    expect(learned.region, 'region was measured').toBeGreaterThan(0);
 
     for (const h of handles.splice(0)) h.stop();
     delete (window as unknown as Record<string, unknown>).__accessibleRumStarted;
-    // A larger multiplier from another page is kept (max wins), and starts the next page's model.
+    // A larger ratio from another page is kept (max wins), and starts the next page's model.
     sessionStorage.setItem('a11y_rum_learned', JSON.stringify({ ...learned, region: 1000 }));
     const second = fakeAxe();
     let clock2 = 0;
@@ -830,6 +833,48 @@ describe('idle windows', () => {
     await settle();
     expect(regionRuns(second), 'region was predicted over the window and waits for tab-hide').toBe(0);
     expect(JSON.parse(sessionStorage.getItem('a11y_rum_learned')!).region).toBe(1000);
+  });
+
+  it('a cheap site proves itself on page 1 (tab-hide run), and page 2 runs the grid part in an idle window', async () => {
+    // 49 ms first run on ~22 elements: the pure model puts the grid part at ~160 ms, over the 150 ms window.
+    document.body.innerHTML = `<main>${'<p>x</p>'.repeat(20)}</main>`;
+    const gridRuns = (axe: ReturnType<typeof fakeAxe>): number =>
+      axe.calls.filter((c) => c.options?.runOnly?.values?.includes('color-contrast')).length;
+    const costed = () => {
+      const clock = { t: 0 };
+      const base = fakeAxe();
+      const axe = {
+        calls: base.calls,
+        run(context: Element | Document, options?: unknown) {
+          const values = (options as { runOnly?: { values?: string[] } } | undefined)?.runOnly?.values;
+          clock.t += values?.includes('color-contrast') ? 20 : values?.includes('region') ? 1 : context === document ? 49 : 2;
+          return base.run(context, options as object);
+        },
+      };
+      return { axe, now: () => clock.t };
+    };
+
+    const one = costed();
+    startWith(one.axe, { idleQuietMs: 100000, now: one.now }); // no window opens on this page
+    await settle();
+    expect(gridRuns(one.axe), 'over the window: waits for tab-hide').toBe(0);
+    setVisibility('hidden');
+    document.dispatchEvent(new Event('visibilitychange'));
+    await settle();
+    expect(gridRuns(one.axe), 'ran at tab-hide').toBe(1);
+    const stored = JSON.parse(sessionStorage.getItem('a11y_rum_learned')!) as Record<string, number>;
+    expect(stored.grid, 'measured ratio, below 1').toBeGreaterThan(0);
+    expect(stored.grid).toBeLessThan(0.25);
+
+    for (const h of handles.splice(0)) h.stop();
+    delete (window as unknown as Record<string, unknown>).__accessibleRumStarted;
+    setVisibility('visible');
+    const two = costed();
+    startWith(two.axe, { idleQuietMs: 20, now: two.now });
+    await settle();
+    await wait(60);
+    await settle();
+    expect(gridRuns(two.axe), 'page 2 runs the grid part while the visitor reads').toBe(1);
   });
 
   it('a visitor who keeps interacting gets no window', async () => {

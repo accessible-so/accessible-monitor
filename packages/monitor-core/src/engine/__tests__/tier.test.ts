@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PART_COST, pageTier, predictPartMs, slower } from '../tier';
+import { LEARNED_FLOOR, LEARNED_HEADROOM, PART_COST, learnedFactor, pageTier, predictPartMs, slower } from '../tier';
 
 describe('page tier', () => {
   it('is fast when chunks fit the active budget and every part fits an idle window', () => {
@@ -31,14 +31,29 @@ describe('page tier', () => {
     expect(pageTier(10, 0, { grid: { base: 15, perThousand: 0 }, region: { base: 1, perThousand: 0 } })).toBe('fast');
     expect(pageTier(10, 0, { grid: { base: 15.1, perThousand: 0 }, region: { base: 1, perThousand: 0 } })).toBe('medium');
   });
-  it('lets learned multipliers decide what fits', () => {
+  it('lets learned factors decide what fits', () => {
     expect(pageTier(10, 0)).toBe('fast'); // grid predicts 30 ms
     expect(pageTier(10, 0, PART_COST, 50, 150, { grid: 3 })).toBe('fast'); // 90 ms
     expect(pageTier(10, 0, PART_COST, 50, 150, { grid: 6 })).toBe('medium'); // 180 ms
   });
+  it('is fast with a persisted low ratio on a page that is medium on the pure model', () => {
+    expect(pageTier(10, 1000)).toBe('medium'); // grid predicts 180 ms
+    expect(pageTier(10, 1000, PART_COST, 50, 150, { grid: learnedFactor(0.4) })).toBe('fast'); // 180 x 0.4 x 1.25 = 90 ms
+  });
   it('uses the fixture coefficients', () => {
     expect(PART_COST.grid).toEqual({ base: 3, perThousand: 15 });
     expect(PART_COST.region).toEqual({ base: 0.5, perThousand: 0.8 });
+  });
+});
+
+describe('learnedFactor', () => {
+  it('is exactly 1 with no measurement, else max(floor, measured) x headroom', () => {
+    expect(learnedFactor(undefined)).toBe(1);
+    expect(LEARNED_HEADROOM).toBe(1.25);
+    expect(LEARNED_FLOOR).toBe(0.25);
+    expect(learnedFactor(0.4)).toBeCloseTo(0.5, 10);
+    expect(learnedFactor(0.05)).toBeCloseTo(0.25 * 1.25, 10);
+    expect(learnedFactor(2)).toBe(2.5);
   });
 });
 

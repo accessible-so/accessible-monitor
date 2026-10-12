@@ -12,7 +12,7 @@ import type { Chunk } from './chunks';
 import { DOCUMENT_COST_PARTS, resolveNodeElement, runChunk, runDocumentCost, runPage } from './axe-runner';
 import type { AxeLike, AxeNodeLike, AxeViolationLike } from './axe-runner';
 import type { SchedulerApi } from './scheduler';
-import { PART_COST, modelPartMs, pageTier, predictPartMs } from './tier';
+import { PART_COST, learnedFactor, modelPartMs, pageTier, predictPartMs } from './tier';
 import type { DocCostPartName } from './tier';
 import type { PageTier } from '../protocol/types';
 
@@ -34,10 +34,14 @@ export interface EngineOptions {
   /** Run the page's first `axe.run` only in an idle window (the session already knows this device is slow). */
   firstRunInWindow?: boolean;
   onTier?: (tier: PageTier) => void;
-  /** Initial per-part multipliers on the cost model (e.g. from earlier pages of the session). Anything not finite or below 1 is ignored. */
+  /**
+   * Largest measured `actualMs / modelMs` per part earlier in the session. Each
+   * replaces the model for its part (times headroom, floored). Anything not
+   * finite and above 0 is ignored.
+   */
   learned?: Partial<Record<DocCostPartName, number>>;
-  /** Called with a copy of the multipliers whenever one rises. */
-  onLearned?: (learned: Record<DocCostPartName, number>) => void;
+  /** Called with a copy of the measured maxima (parts measured so far) whenever one changes, the first measurement included. */
+  onLearned?: (learned: Partial<Record<DocCostPartName, number>>) => void;
 }
 
 export interface EngineApi {
@@ -72,12 +76,16 @@ export function Engine(opts: EngineOptions): EngineApi {
   let fullDone = false;
   let firstRunMs: number | null = null;
   let lastChunkMs: number | null = null;
-  /** Multiplier on the model, raised to what a part actually cost; seeded from the session. */
-  const learned: Record<DocCostPartName, number> = { grid: 1, region: 1 };
-  for (const name of Object.keys(learned) as DocCostPartName[]) {
+  /** Largest measured actualMs / modelMs per part; seeded from the session. */
+  const measured: Partial<Record<DocCostPartName, number>> = {};
+  for (const name of Object.keys(PART_COST) as DocCostPartName[]) {
     const v = opts.learned?.[name];
-    if (typeof v === 'number' && Number.isFinite(v) && v >= 1) learned[name] = v;
+    if (typeof v === 'number' && Number.isFinite(v) && v > 0) measured[name] = v;
   }
+  const factors = (): Partial<Record<DocCostPartName, number>> => ({
+    ...(measured.grid !== undefined && { grid: learnedFactor(measured.grid) }),
+    ...(measured.region !== undefined && { region: learnedFactor(measured.region) }),
+  });
   /** Body element count when the current view's parts were armed. */
   let armedElements = 0;
   /** Parts armed for the current view and not yet run, abandoned, or dropped. */
@@ -93,7 +101,7 @@ export function Engine(opts: EngineOptions): EngineApi {
   };
   // An unmeasured page (no first run yet, or a timer too coarse to read) cannot promise a part fits a window.
   const partPredict = (part: DocCostPartName): number | null =>
-    firstRunMs === null || firstRunMs <= 0 ? Infinity : predictPartMs(firstRunMs, armedElements, PART_COST[part], learned[part]);
+    firstRunMs === null || firstRunMs <= 0 ? Infinity : predictPartMs(firstRunMs, armedElements, PART_COST[part], learnedFactor(measured[part]));
 
   function debug(...args: unknown[]): void {
     try { opts.debug?.(...args); } catch { /* logging never breaks a scan */ }
@@ -193,7 +201,7 @@ export function Engine(opts: EngineOptions): EngineApi {
     armedElements = countElements(body);
     if (firstRunMs !== null) {
       // The tier depends on the page's size, which a route change replaces.
-      const tier = pageTier(firstRunMs, armedElements, PART_COST, undefined, undefined, learned);
+      const tier = pageTier(firstRunMs, armedElements, PART_COST, undefined, undefined, factors());
       scheduler.setTier(tier);
       try { opts.onTier?.(tier); } catch { /* a callback never breaks a scan */ }
     }
@@ -210,9 +218,10 @@ export function Engine(opts: EngineOptions): EngineApi {
         scheduler.unskip(part.rules);
         const predictedMs = partPredict(part.name);
         const modelMs = firstRunMs !== null && firstRunMs > 0 ? modelPartMs(firstRunMs, armedElements, PART_COST[part.name]) : 0;
-        if (modelMs > 0 && ms / modelMs > learned[part.name]) {
-          learned[part.name] = ms / modelMs;
-          try { opts.onLearned?.({ ...learned }); } catch { /* a callback never breaks a scan */ }
+        const ratio = ms / modelMs;
+        if (modelMs > 0 && Number.isFinite(ratio) && ratio > 0 && ratio > (measured[part.name] ?? 0)) {
+          measured[part.name] = ratio;
+          try { opts.onLearned?.({ ...measured }); } catch { /* a callback never breaks a scan */ }
         }
         debug('document-cost part', part.name, ms, predictedMs);
         if (!stopped) report(violations);
@@ -260,7 +269,7 @@ export function Engine(opts: EngineOptions): EngineApi {
           scheduler.markIncomplete();
         } else if (firstRunMs === null) {
           firstRunMs = ms;
-          const tier = pageTier(ms, armedElements, PART_COST, undefined, undefined, learned);
+          const tier = pageTier(ms, armedElements, PART_COST, undefined, undefined, factors());
           scheduler.setTier(tier);
           debug('calibrated', { firstRunMs: ms, elements: armedElements, tier });
           try { opts.onTier?.(tier); } catch { /* a callback never breaks a scan */ }
@@ -302,5 +311,5 @@ export type { SchedulerApi, SchedulerPerf, SchedulerJob, SchedulerOptions } from
 export type { DirtyTrackerApi, DirtyTrackerOptions } from './dirty';
 export { IdleGate, IDLE_QUIET_MS } from './idle-gate';
 export type { IdleGateApi, IdleGateOptions } from './idle-gate';
-export { PART_COST, predictPartMs, pageTier, slower } from './tier';
+export { PART_COST, LEARNED_HEADROOM, LEARNED_FLOOR, learnedFactor, predictPartMs, pageTier, slower } from './tier';
 export type { DocCostPartName } from './tier';
