@@ -414,7 +414,8 @@ describe('Engine document-cost scheduling', () => {
   });
 
   it('runs both parts in an idle window when their predictions fit: a fast page', async () => {
-    // First run 12 ms: grid predicted 120, region 48 — both within 150.
+    // First run 12 ms on a tiny page: grid ~36, region ~6 — both within 150.
+    document.body.innerHTML = '<main><p>small</p></main>';
     const { axe, now } = costedAxe({ page: 12, grid: 30, region: 20, chunk: 5 });
     const gate = manualGate();
     const { engine, scheduler } = build(axe, { gate, now });
@@ -428,7 +429,8 @@ describe('Engine document-cost scheduling', () => {
   });
 
   it('leaves a part for tab-hide when its prediction does not fit a window: a medium page', async () => {
-    // First run 20 ms: grid predicted 200 (does not fit), region 80 (fits).
+    // First run 20 ms on 1,500 elements: grid predicted 20 x 25.5 = 510 (does not fit), region 20 x 1.7 = 34 (fits).
+    document.body.innerHTML = `<main>${'<p>x</p>'.repeat(1500)}</main>`;
     const { axe, now } = costedAxe({ page: 20, grid: 40, region: 20, chunk: 5 });
     const gate = manualGate();
     const { engine, scheduler } = build(axe, { gate, now });
@@ -441,17 +443,20 @@ describe('Engine document-cost scheduling', () => {
   });
 
   it('learns from a part that ran longer than predicted, so the mistake is made once per page', async () => {
-    // First run 10 ms. Region predicted 40 but takes 60 (ratio 6 > 4); grid predicted 100, takes 50 (ratio stays 10).
-    const { axe, now } = costedAxe({ page: 10, grid: 50, region: 60, chunk: 5 });
+    document.body.innerHTML = '<main><p>small</p></main>';
+    // First run 10 ms on a tiny page. Region is modelled at ~5 ms but takes 60 (learned ~12); grid is modelled at ~30, takes 20 (learned stays 1).
+    const { axe, now } = costedAxe({ page: 10, grid: 20, region: 60, chunk: 5 });
     const gate = manualGate();
     const { engine } = build(axe, { gate, now });
     engine.scanFull();
     await micro();
-    expect(engine.predictedPartMs('region')).toBe(40);
+    const regionBefore = engine.predictedPartMs('region')!;
+    const gridBefore = engine.predictedPartMs('grid')!;
+    expect(regionBefore).toBeLessThan(10);
     gate.open();
     await micro();
-    expect(engine.predictedPartMs('region')).toBe(60);
-    expect(engine.predictedPartMs('grid')).toBe(100);
+    expect(engine.predictedPartMs('region')).toBeCloseTo(60, 5);
+    expect(engine.predictedPartMs('grid')).toBe(gridBefore);
   });
 
   it('drops the parts at drain on a page over the element ceiling, reporting them skipped', async () => {

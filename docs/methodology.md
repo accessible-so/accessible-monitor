@@ -128,7 +128,7 @@ and [`session/sampling.ts`](../packages/monitor-core/src/session/sampling.ts).
 
 ## 4. The performance budget
 
-The rule the collector holds itself to: **never be the reason a page is slow.**
+The rule the collector holds itself to: **never in the way of a visitor's input.** Heavy checks run only while the visitor is idle; a visitor who is interacting never waits on more than 50 ms of collector work, beyond the one run that measures their device.
 
 - The loader defers injecting the engine to `requestIdleCallback` (3s timeout,
   1.5s `setTimeout` fallback).
@@ -151,6 +151,21 @@ The rule the collector holds itself to: **never be the reason a page is slow.**
   the whole page on every run: ~22ms for any chunk of the 5,300-element fixture
   on a fast laptop, ~54ms at a mid-range phone's speed), so on a slow device
   every halving was one more long task that bought nothing.
+- **Two budgets.** While the visitor is active a task has **50 ms**. While
+  they are idle it has a **150 ms window** (Interaction to Next Paint counts up
+  to 200 ms as good, and a click lands at the very start of a task only
+  rarely). The window is open when the page is visible and loaded, nothing has
+  been pressed, scrolled, touched or wheeled for **1 s**, and
+  `navigator.scheduling.isInputPending()` (Chromium; elsewhere the quiet timer
+  alone) says nothing is waiting. Input during a task closes the window, but
+  cannot stop the task: `axe.run` is not interruptible. Nothing further starts
+  until the page has been quiet again. A task predicted over 150 ms never starts
+  in a window.
+- **Prediction, not labels.** Before a task starts in a window the engine
+  predicts its cost (§4.2). A chunk is predicted as the last chunk's time, or
+  the first run's before any chunk has run. A document-cost part is predicted
+  from the first run and the page's size. Behaviour follows the predictions; the
+  tier is only the name for what they said.
 - Two further ceilings bound a page that mutates forever: at most **200 scans**
   and at most **50,000 elements** covered per page. Either one stops collection
   the same way.
@@ -160,6 +175,9 @@ The rule the collector holds itself to: **never be the reason a page is slow.**
   reported as unmeasured, never as clean.** A parked page whose queue is then
   finished at tab-hide reports `aborted: false` on its last beacon. Every beacon
   carries `perf`, not just the last one.
+- **Route changes.** On a client-side navigation, the old view's gap (a
+  document-cost part still pending) is flushed as `skipped` before the new view
+  is armed, so it is reported rather than carried silently into the next view.
 - Hiding the tab (`visibilitychange` to hidden) or leaving it (`pagehide`)
   flushes one final beacon — with one inline retry, because the interval that
   would otherwise carry the retry is about to be cleared — and then tears
@@ -198,32 +216,80 @@ meet the 50ms budget, and a 5,000-element page aborted after three strikes
 having reported nothing at all. Rebuilding the collector with `chunkMax: 25`
 changed `maxTaskMs` by nothing.
 
-So they are their own pass, `DOCUMENT_COST_RULES`, run at most once per page
-and disabled inside every chunk run. It is one indivisible `axe.run` — there is
-nothing to chunk — so the only question is *when*:
+So they are their own pass, `DOCUMENT_COST_RULES`, run at most once per view
+and disabled inside every chunk run. It is two indivisible `axe.run`s (nothing
+to chunk): the **grid part** (`color-contrast`, `link-in-text-block`,
+`target-size`, which share one spatial grid) and the **`region` part**, which
+walks the document and has a different cost shape. Two shorter tasks fit
+windows that one long one does not, and each leaves `perf.pending` on its own.
 
-| Document elements | What happens | Why |
+The question is *when*, and the answer is a prediction (§4.2):
+
+| Prediction for the part | What happens | Why |
 |---|---|---|
-| **≤ 3,000** | **deferred** to the moment the tab is hidden | nobody is waiting on the main thread once the visitor has looked away |
-| **> 3,000** | not run; the rule ids go in `perf.skipped` | one pass costs over a second at this size on a fast laptop — too much to ask of any moment |
+| **≤ 150 ms** | runs in the **first idle window** after load | the visitor is not interacting and the task fits the window |
+| **> 150 ms**, document **≤ 3,000** elements | **deferred** to the moment the tab is hidden | nobody is waiting on the main thread once the visitor has looked away |
+| **> 150 ms**, document **> 3,000** elements | dropped at tab-hide; the rule ids go in `perf.skipped` | one pass costs over a second on a fast laptop at this size |
 
-There used to be a third tier: pages up to 250 elements ran the pass straight
-away. That threshold was measured on a fast laptop, where the 120-element front
-page costs ~22ms. Measured again under Chromium's CPU throttling, the same pass
-costs ~40ms at 2x, ~76ms at 4x and ~117ms at 6x — over budget on a mid-range
-phone even for a small page. No size is small enough to run it while the
-visitor is looking without knowing the device, so no page does.
+A part predicted to fit a window still runs on a large page: the 3,000-element
+line only decides what happens to a part that did *not* fit one. No size is
+small enough to run a part while the visitor is *active* without knowing the
+device: measured under Chromium's CPU throttling, the 120-element front page's
+whole pass costs ~22 ms on a laptop, ~76 ms at 4x and ~117 ms at 6x.
 
-A consequence for single-page apps: one pass waits for the tab to hide, and it
-checks the view showing then. Views the visitor navigated through client-side
-earlier are not contrast-checked. A beacon sent from such a view carries
-`perf.pending`, so the server records the rules as not yet checked there rather
-than as passed.
+A consequence for single-page apps: a part that did not fit a window waits for
+the tab to hide, and it checks the view showing then. A view the visitor
+navigated away from first has its pending rules flushed as `skipped`. A beacon
+sent from a view with a part waiting carries `perf.pending`, so the server
+records the rules as not yet checked there rather than as passed.
+
+### 4.2 Predicting a part's cost
+
+Every prediction starts from the page's **first run**: the page-level
+`axe.run`, made once per view, whose cost is mostly the document-wide floor axe
+pays on every run. It measures this page on this device.
+
+    predicted ms = firstRunMs × (base + perThousand × elements / 1000) × learned
+
+| Part | base | perThousand |
+|---|---|---|
+| grid | 3 | 15 |
+| `region` | 0.5 | 0.8 |
+
+Why not per element: the first run has a fixed floor, so dividing by the element
+count would call a 120-element page on a fast laptop "slow". Why not a constant
+multiple of the first run: contrast builds a grid over the whole page, so its
+cost grows with the page while the first run barely does. At 1x, the grid part
+cost 3.7x the first run at 120 elements, 7.1x at 419 and 17.6x at 1,121; no one
+ratio fits those. The coefficients are a least-squares fit to those points
+rounded up (grid: ~2 + 14 per thousand elements), and `region` bounds all four
+measured pages. Where the measurements disagreed with the fit, the fit was
+raised, never the bound lowered: an underestimate puts a long task in front of
+the visitor, an overestimate only defers work to tab-hide.
+
+`elements` is the body's count when the view was armed. `learned` starts at 1
+and, after a part runs, becomes the larger of itself and `actualMs / modelMs`,
+so a page that overruns once is never under-predicted again for the rest of its
+life.
+
+The **tier** names what the predictions said, per view (`perf.tier`):
+
+| Tier | Rule | Meaning |
+|---|---|---|
+| `fast` | first run ≤ 50 ms and every part predicted ≤ 150 ms | everything fits |
+| `medium` | first run ≤ 50 ms, some part predicted > 150 ms | chunks fit; that part waits for tab-hide |
+| `slow` | first run > 50 ms | even one chunk is a long task; the page parks |
+
+The **session hint** is the slowest tier any page of the session has measured
+(`sessionStorage`). It decides only when the first run itself happens: on a
+session already known to be `slow`, the first run waits for a window instead of
+being the one long task the visitor pays for. `navigator.connection.saveData`
+turns windows off entirely; the visitor asked for less.
 
 ### The order on the way out
 
-Hiding the tab is when the saved work runs: the document-cost pass, then any
-parked or not-yet-reached scanning. A hidden tab may be frozen or discarded at
+Hiding the tab runs only what idle windows did not: any document-cost part
+still pending, then any parked or not-yet-reached scanning. A hidden tab may be frozen or discarded at
 any moment, so when that work is long it does **not** go first:
 
 1. **flush** everything the collector already has, with its one retry — but
@@ -232,7 +298,7 @@ any moment, so when that work is long it does **not** go first:
    ~250ms at a mid-range phone's speed). A small page's pass runs first and
    everything leaves in one beacon, because every beacon counts against the
    site's daily cap;
-2. run the deferred document-cost pass;
+2. run the document-cost parts still pending;
 3. if scanning was parked or unfinished, **flush** the contrast findings, then
    finish the queue, one chunk after another;
 4. if a beacon already sent said `pending` or `aborted` and that is no longer
@@ -249,7 +315,7 @@ short, and then the earlier beacon's `aborted: true` stands.
 Losing the contrast findings because the browser froze the tab is a small loss.
 Losing the whole beacon because a scan was queued in front of it is not.
 
-`visibilitychange` to hidden is the deferred pass's moment and its last one.
+`visibilitychange` to hidden is a deferred part's moment and its last one.
 `pagehide` is not: the page is unloading and there is no time, so the pass is
 abandoned and its rules are named in `perf.skipped` instead of quietly going
 missing. The same happens if `pagehide` arrives while the deferred pass is
@@ -257,27 +323,41 @@ already running.
 
 ### Measured, per fixture page
 
-The beacon and `skipped` columns describe **a pageview that ends on a
-backgrounded tab** — the visitor switches away, or the tab is hidden while the
-page stays loaded. That is the only ending in which a deferred pass gets its
-moment.
+A visitor reads the page, then clicks a link: `visibilitychange` and `pagehide`
+arrive together, so nothing is left to run at tab-hide and whatever the idle
+windows did not cover is reported unchecked. "Grid rules" is `color-contrast`,
+`link-in-text-block` and `target-size`; "all four" adds `region`. Measured in
+the browser suite (`packages/monitor/test/browser/perf.browser.test.ts`) at 1x,
+4x and 6x Chromium CPU throttling.
 
-| Fixture page | Elements | Tier | Worst task while visible | Worst task overall | Beacons *(backgrounded tab)* | `skipped` *(backgrounded tab)* |
-|---|---|---|---|---|---|---|
-| `/` | 120 | immediate | 32 ms | 32 ms | 1 | — |
-| `/products.html` | 419 | deferred | 26 ms | 113 ms (after hiding) | 2 | — |
-| `/mid.html` | 1,121 | deferred | 13 ms | 227 ms (after hiding) | 2 | — |
-| `/big.html` | 5,345 | skipped | 26 ms | 26 ms | 1 | the four rules |
+| Fixture page | Elements | Rate | Tier | Unchecked at the click | Idle runs |
+|---|---|---|---|---|---|
+| `/` | 112 | 1x | fast | none | 2 |
+| `/products.html` | 412 | 1x | fast | none | 2 |
+| `/mid.html` | 1,114 | 1x | medium | grid rules | 1 |
+| `/big.html` | 5,338 | 1x | medium | grid rules | 1 |
+| `/` | 112 | 4x | medium | grid rules | 1 |
+| `/products.html` | 412 | 4x | slow | grid rules | 8 |
+| `/mid.html` | 1,114 | 4x | medium | grid rules | 1 |
+| `/big.html` | 5,338 | 4x | slow | all four | 75 |
+| `/` | 112 | 6x | slow | grid rules | 4 |
+| `/products.html` | 412 | 6x | slow | grid rules | 8 |
+| `/mid.html` | 1,114 | 6x | slow | grid rules | 10 |
+| `/big.html` | 5,338 | 6x | slow | all four | 0 |
 
-**On a navigation away, `pagehide` follows `visibilitychange` immediately; the
-deferred pass is abandoned before it can run and is reported in `perf.skipped`.
-Most mid-size pageviews that end in a click therefore report contrast as
-unchecked.** The two-beacon ending in the table above is what a *backgrounded*
-tab produces. A visitor who reads the page and then clicks a link — the ordinary
-case — produces one beacon, with `color-contrast`, `link-in-text-block`,
-`target-size` and `region` all named as not run. The deferred tier is worth
-having because it turns silence into either coverage or an explicit gap; it is
-not a claim that mid-size pages usually get their contrast checked.
+On a fast device the small and mid-size pages are fully checked by the time the
+reader clicks. As the device slows the first run grows, the predictions follow
+it, and parts that no longer fit a window are left for tab-hide, which a click
+never reaches: they are then reported in `perf.skipped`, not as clean. The
+`region` part is cheap enough to run in a window almost everywhere, so what
+usually goes unchecked is the grid. The two-beacon ending (the part runs after
+the tab is hidden, a second beacon follows) is what a *backgrounded* tab
+produces instead. At 6x the 5,338-element page reports zero idle runs: its
+first run alone is 160 ms.
+
+At 1x the grid part cost 51 ms on 112 elements (predicted 45) and 97 ms on 412
+(predicted 123); `region` cost 70 ms on 5,338 elements (predicted 128). The
+model errs high; no part in the suite exceeded 180 ms.
 
 ### What is not reported
 

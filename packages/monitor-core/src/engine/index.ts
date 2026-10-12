@@ -12,7 +12,7 @@ import type { Chunk } from './chunks';
 import { DOCUMENT_COST_PARTS, resolveNodeElement, runChunk, runDocumentCost, runPage } from './axe-runner';
 import type { AxeLike, AxeNodeLike, AxeViolationLike } from './axe-runner';
 import type { SchedulerApi } from './scheduler';
-import { INITIAL_RATIOS, pageTier, predictPartMs } from './tier';
+import { PART_COST, modelPartMs, pageTier, predictPartMs } from './tier';
 import type { DocCostPartName } from './tier';
 import type { PageTier } from '../protocol/types';
 
@@ -66,7 +66,10 @@ export function Engine(opts: EngineOptions): EngineApi {
   let fullDone = false;
   let firstRunMs: number | null = null;
   let lastChunkMs: number | null = null;
-  const ratios: Record<DocCostPartName, number> = { ...INITIAL_RATIOS };
+  /** Per-page multiplier on the model, raised to what a part actually cost. */
+  const learned: Record<DocCostPartName, number> = { grid: 1, region: 1 };
+  /** Body element count when the current view's parts were armed. */
+  let armedElements = 0;
   /** Parts armed for the current view and not yet run, abandoned, or dropped. */
   const pendingParts = new Set<DocCostPartName>();
   /** Whether the current view's parts would run at drain ('first') or be dropped there. */
@@ -75,7 +78,7 @@ export function Engine(opts: EngineOptions): EngineApi {
   let docGen = 0;
 
   const chunkPredict = (): number | null => lastChunkMs ?? firstRunMs;
-  const partPredict = (part: DocCostPartName): number | null => predictPartMs(firstRunMs, ratios[part]);
+  const partPredict = (part: DocCostPartName): number | null => predictPartMs(firstRunMs, armedElements, PART_COST[part], learned[part]);
 
   function debug(...args: unknown[]): void {
     try { opts.debug?.(...args); } catch { /* logging never breaks a scan */ }
@@ -172,7 +175,8 @@ export function Engine(opts: EngineOptions): EngineApi {
     const body = doc.body;
     if (!body) return;
     const gen = ++docGen;
-    partsAtDrain = countElements(body) > contrastDeferMax ? 'drop' : 'first';
+    armedElements = countElements(body);
+    partsAtDrain = armedElements > contrastDeferMax ? 'drop' : 'first';
     for (const part of DOCUMENT_COST_PARTS) {
       pendingParts.add(part.name);
       scheduler.defer(part.rules);
@@ -182,8 +186,10 @@ export function Engine(opts: EngineOptions): EngineApi {
         // Abandoned or re-armed while it ran: its rules were already reported.
         if (gen !== docGen || !pendingParts.delete(part.name)) return ms;
         scheduler.unskip(part.rules);
-        if (firstRunMs !== null && firstRunMs > 0) ratios[part.name] = Math.max(ratios[part.name], ms / firstRunMs);
-        debug('document-cost part', part.name, ms, firstRunMs);
+        const predictedMs = partPredict(part.name);
+        const modelMs = firstRunMs !== null && firstRunMs > 0 ? modelPartMs(firstRunMs, armedElements, PART_COST[part.name]) : 0;
+        if (modelMs > 0) learned[part.name] = Math.max(learned[part.name], ms / modelMs);
+        debug('document-cost part', part.name, ms, predictedMs);
         if (!stopped) report(violations);
         return ms;
       }, 0, {
@@ -224,9 +230,9 @@ export function Engine(opts: EngineOptions): EngineApi {
         const { violations, ms } = await runPage(axe, doc, opts.now);
         if (firstRunMs === null) {
           firstRunMs = ms;
-          const tier = pageTier(ms, ratios);
+          const tier = pageTier(ms, armedElements);
           scheduler.setTier(tier);
-          debug('calibrated', { firstRunMs: ms, tier });
+          debug('calibrated', { firstRunMs: ms, elements: armedElements, tier });
           try { opts.onTier?.(tier); } catch { /* a callback never breaks a scan */ }
         }
         if (!stopped) report(violations);
@@ -266,5 +272,5 @@ export type { SchedulerApi, SchedulerPerf, SchedulerJob, SchedulerOptions } from
 export type { DirtyTrackerApi, DirtyTrackerOptions } from './dirty';
 export { IdleGate, IDLE_QUIET_MS } from './idle-gate';
 export type { IdleGateApi, IdleGateOptions } from './idle-gate';
-export { INITIAL_RATIOS, predictPartMs, pageTier, slower } from './tier';
+export { PART_COST, predictPartMs, pageTier, slower } from './tier';
 export type { DocCostPartName } from './tier';

@@ -1,39 +1,56 @@
 import { describe, expect, it } from 'vitest';
-import { INITIAL_RATIOS, pageTier, predictPartMs, slower } from '../tier';
+import { PART_COST, pageTier, predictPartMs, slower } from '../tier';
 
 describe('page tier', () => {
   it('is fast when chunks fit the active budget and every part fits an idle window', () => {
-    // 12 ms first run: grid 120 ms, region 48 ms — both within 150.
-    expect(pageTier(12, INITIAL_RATIOS)).toBe('fast');
+    // 9.3 ms, 120 elements: grid 9.3 x 4.8 = 45 ms.
+    expect(pageTier(9.3, 120)).toBe('fast');
+  });
+  it('is fast on the products fixture, which the model says fits', () => {
+    // 14 ms, 419 elements: grid 14 x 9.285 = 130 ms.
+    expect(pageTier(14, 419)).toBe('fast');
   });
   it('is medium when chunks fit but a part does not fit a window', () => {
-    // 20 ms first run: grid predicted 200 ms.
-    expect(pageTier(20, INITIAL_RATIOS)).toBe('medium');
+    // 11.7 ms, 1,121 elements: grid 11.7 x 19.8 = 232 ms.
+    expect(pageTier(11.7, 1121)).toBe('medium');
   });
   it('is slow when even the first run is a long task', () => {
-    expect(pageTier(51, INITIAL_RATIOS)).toBe('slow');
+    expect(pageTier(51, 10)).toBe('slow');
   });
   it('does not call a small page on a fast device slow (the reason it is not per element)', () => {
-    // A 120-element page whose first run is 4 ms: anything per-element would blow this up.
-    expect(pageTier(4, INITIAL_RATIOS)).toBe('fast');
+    expect(pageTier(4, 120)).toBe('fast');
   });
-  it('uses ratios raised by measurement', () => {
-    expect(pageTier(12, { grid: 20, region: 4 })).toBe('medium');
+  it('grows with the page: the same first run is medium on a bigger page', () => {
+    expect(pageTier(12, 400)).toBe('fast');
+    expect(pageTier(12, 1500)).toBe('medium');
   });
   it('is medium at the exact active budget boundary (50 ms)', () => {
-    // 50 ms first run: exactly at active budget (not slow), but grid predicts 500 ms > 150 ms.
-    expect(pageTier(50, INITIAL_RATIOS)).toBe('medium');
+    expect(pageTier(50, 10)).toBe('medium');
   });
   it('is fast when a part predicts exactly the idle boundary (150 ms)', () => {
-    // 15 ms first run: grid predicts exactly 150 ms, region predicts 60 ms — both fit.
-    expect(pageTier(15, INITIAL_RATIOS)).toBe('fast');
+    // 10 ms first run, grid base 3 + 12/1000 x 15... pick a cost that lands on 150 exactly.
+    expect(pageTier(10, 0, { grid: { base: 15, perThousand: 0 }, region: { base: 1, perThousand: 0 } })).toBe('fast');
+    expect(pageTier(10, 0, { grid: { base: 15.1, perThousand: 0 }, region: { base: 1, perThousand: 0 } })).toBe('medium');
+  });
+  it('uses the fixture coefficients', () => {
+    expect(PART_COST.grid).toEqual({ base: 3, perThousand: 15 });
+    expect(PART_COST.region).toEqual({ base: 0.5, perThousand: 0.8 });
   });
 });
 
 describe('predictions', () => {
-  it('is a multiple of the first run, unknown before it', () => {
-    expect(predictPartMs(null, 10)).toBeNull();
-    expect(predictPartMs(15, 10)).toBe(150);
+  const cost = { base: 3, perThousand: 15 };
+  it('is first run x (base + perThousand x elements / 1000), unknown before it', () => {
+    expect(predictPartMs(null, 1000, cost)).toBeNull();
+    expect(predictPartMs(10, 1000, cost)).toBe(180);
+    expect(predictPartMs(10, 0, cost)).toBe(30);
+  });
+  it('scales by what was learned from this page', () => {
+    expect(predictPartMs(10, 1000, cost, 1.5)).toBe(270);
+  });
+  it('matches the measured fixtures (methodology 4.1)', () => {
+    expect(predictPartMs(26.1, 5345, PART_COST.region)).toBeCloseTo(125, 0);
+    expect(predictPartMs(11.7, 1121, PART_COST.grid)).toBeCloseTo(232, 0);
   });
 });
 

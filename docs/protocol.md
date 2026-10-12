@@ -54,6 +54,8 @@ export interface RumBeacon {
     scans: number; longTasks: number; maxTaskMs: number; aborted: boolean;
     skipped?: string[];                 // rules deliberately not run on this page
     pending?: string[];                 // rules whose deferred pass has not run yet
+    tier?: 'fast' | 'medium' | 'slow';  // this page view's tier
+    idleRuns?: number;                  // tasks run in idle windows
   };
 }
 
@@ -127,6 +129,8 @@ report is not sent at all.
 | `aborted` | `boolean` | `true` while the engine has stopped scanning early: parked after a task over the 50ms budget while the visitor was looking (cleared on a later beacon if the rest is finished when the tab hides), 200 scans, 50,000 elements covered, or queued work dropped because the page unloaded. **An aborted page is unmeasured, not clean.** |
 | `pending` | `string[]` (optional) | Rules whose pass has been **postponed and has not happened yet** — the document-cost set on a mid-size page, waiting for the tab to hide. Present on every beacon sent while the pass is still waiting. **A rule listed here has not been checked yet**; it is not a skipped rule and not a clean one. At most 16 ids of at most 64 characters. |
 | `skipped` | `string[]` (optional) | Rules the engine did not run, for cost — the document-cost set on a page too large to afford it, or a pass that was deferred to the tab-hidden moment and never got one (the page unloaded instead). At most four ids, and a rule leaves the list if a later pass on the same page does run it. **A rule listed here was not checked; its absence from `findings` says nothing.** See [methodology §4.1](./methodology.md#41-contrast-on-large-pages). |
+| `tier` | `'fast' \| 'medium' \| 'slow'` (optional) | This page view's tier, from its first run: `fast` when every task fits an idle window, `medium` when a document-cost part does not, `slow` when even one chunk is a long task. Absent until the first run has been measured. See [methodology §4.2](./methodology.md#42-predicting-a-parts-cost). |
+| `idleRuns` | `number` (optional) | Tasks run in idle windows (more than the 50ms budget allowed while the visitor was active). Absent when none ran. |
 
 `skipped` and `pending` are disjoint: a rule is in at most one of them. It moves
 from `pending` to `skipped` when the pass is given up on, and leaves both when
