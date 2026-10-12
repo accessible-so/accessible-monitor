@@ -247,7 +247,10 @@ records the rules as not yet checked there rather than as passed.
 
 Every prediction starts from the page's **first run**: the page-level
 `axe.run`, made once per page load, whose cost is mostly the document-wide floor axe
-pays on every run. It measures this page on this device.
+pays on every run. It measures this page on this device. A first run that fails
+measures nothing: the page stays uncalibrated (no `perf.tier`), its parts are
+predicted as unbounded so they never start in a window, and they run, or are dropped,
+when the tab hides.
 
     predicted ms = firstRunMs × (base + perThousand × elements / 1000) × learned
 
@@ -270,10 +273,13 @@ the visitor, an overestimate only defers work to tab-hide.
 
 `elements` is the body's count when the view was armed, and the tier is
 recomputed from it on each client-side route change; the first run is not
-repeated. `learned` persists across views for the life of the page load. It starts at 1
+repeated. `learned` persists across views and across the pages of a session
+(kept in `sessionStorage`, the larger value per part winning). It starts at 1
 and, after a part runs, becomes the larger of itself and `actualMs / modelMs`,
-so a page that overruns once is never under-predicted again for the rest of its
-life.
+so a site that overruns once is not under-predicted again for the rest of the
+session. It has no upper cap: a larger multiplier only defers work to tab-hide.
+A window task that nonetheless runs over 150 ms is counted in
+`perf.windowOverruns`, so the coefficients can be raised from field data.
 
 The **tier** names what the predictions said, per view (`perf.tier`):
 
@@ -362,7 +368,7 @@ At 1x the grid part cost 51 ms on 112 elements (predicted 45) and 97 ms on 412
 (predicted 123); `region` cost 70 ms on 5,338 elements (predicted 128). The
 model under-predicted on two 1x pages: the grid part on `/` (51 ms against
 45 predicted, 13% over) and `region` on `/mid.html` (21 ms against 16, 28%
-over). The `learned` multiplier corrects each after its first run, and every
+over). The `learned` multiplier corrects each after its first run (for the rest of the session), and every
 part that ran while the visitor was looking stayed within the 180 ms bound.
 
 ### What is not reported
