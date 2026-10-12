@@ -394,7 +394,7 @@ At 1x the grid part cost 51 ms on 112 elements (predicted 45) and 97 ms on 412
 (predicted 123); `region` cost 70 ms on 5,338 elements (predicted 128). The
 model under-predicted on two 1x pages: the grid part on `/` (51 ms against
 45 predicted, 13% over) and `region` on `/mid.html` (21 ms against 16, 28%
-over). The measured ratio replaces the model for each part after its first run (for the
+over). The measured ratio sets the factor for each part after its first run (for the
 rest of the session), and every part that ran while the visitor was interacting
 stayed within the 180 ms bound.
 

@@ -390,8 +390,6 @@ describe('startCollector', () => {
 
   it('detaches everything when the page hides: no more scans, no more timers', async () => {
     vi.useFakeTimers();
-    // jsdom schedules a timer for every Storage write under fake timers; it is not ours to count.
-    const storageWrite = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {});
     const axe = fakeAxe();
     start(axe);
     await micro();
@@ -407,6 +405,9 @@ describe('startCollector', () => {
     expect(axe.calls.length).toBeGreaterThan(afterFullScan);
     const beforeHide = axe.calls.length;
 
+    // jsdom schedules a timer for every Storage write under fake timers; it is not ours to count.
+    const storageWrite = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {});
+    try {
     setVisibility('hidden');
     document.dispatchEvent(new Event('visibilitychange'));
     await micro();
@@ -423,7 +424,7 @@ describe('startCollector', () => {
     await micro();
     expect(axe.calls.length).toBe(beforeHide + 2);
     expect(beacons.length).toBe(1);
-    storageWrite.mockRestore();
+    } finally { storageWrite.mockRestore(); }
 
     // A click no longer reaches us either, and a second halt is a no-op.
     document.querySelector<HTMLElement>('#a')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -833,6 +834,24 @@ describe('idle windows', () => {
     await settle();
     expect(regionRuns(second), 'region was predicted over the window and waits for tab-hide').toBe(0);
     expect(JSON.parse(sessionStorage.getItem('a11y_rum_learned')!).region).toBe(1000);
+  });
+
+  it('keeps a stored part this collector did not measure', async () => {
+    document.body.innerHTML = `<main>${'<p>x</p>'.repeat(20)}</main>`;
+    let clock = 0;
+    const axe = fakeAxe();
+    const run = axe.run.bind(axe);
+    axe.run = (c: Element | Document, o?: unknown) => { clock += 20; return run(c, o as object); };
+    startWith(axe, { idleQuietMs: 100000, now: () => clock });
+    await settle();
+    // Another collector on the origin (an iframe) writes region after this one started.
+    sessionStorage.setItem('a11y_rum_learned', JSON.stringify({ region: 1e6 }));
+    setVisibility('hidden');
+    document.dispatchEvent(new Event('visibilitychange'));
+    await settle();
+    const stored = JSON.parse(sessionStorage.getItem('a11y_rum_learned')!) as Record<string, number>;
+    expect(stored.region, 'the other collector\'s region ratio survives').toBeGreaterThanOrEqual(1e6);
+    expect(stored.grid).toBeGreaterThan(0);
   });
 
   it('a cheap site proves itself on page 1 (tab-hide run), and page 2 runs the grid part in an idle window', async () => {

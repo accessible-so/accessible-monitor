@@ -36,8 +36,8 @@ export interface EngineOptions {
   onTier?: (tier: PageTier) => void;
   /**
    * Largest measured `actualMs / modelMs` per part earlier in the session. Each
-   * replaces the model for its part (times headroom, floored). Anything not
-   * finite and above 0 is ignored.
+   * sets the factor for its part (times headroom, floored). Anything that is
+   * not a finite number above 0 is ignored.
    */
   learned?: Partial<Record<DocCostPartName, number>>;
   /** Called with a copy of the measured maxima (parts measured so far) whenever one changes, the first measurement included. */
@@ -82,10 +82,13 @@ export function Engine(opts: EngineOptions): EngineApi {
     const v = opts.learned?.[name];
     if (typeof v === 'number' && Number.isFinite(v) && v > 0) measured[name] = v;
   }
-  const factors = (): Partial<Record<DocCostPartName, number>> => ({
-    ...(measured.grid !== undefined && { grid: learnedFactor(measured.grid) }),
-    ...(measured.region !== undefined && { region: learnedFactor(measured.region) }),
-  });
+  const factors = (): Partial<Record<DocCostPartName, number>> => {
+    const out: Partial<Record<DocCostPartName, number>> = {};
+    for (const name of Object.keys(PART_COST) as DocCostPartName[]) {
+      if (measured[name] !== undefined) out[name] = learnedFactor(measured[name]);
+    }
+    return out;
+  };
   /** Body element count when the current view's parts were armed. */
   let armedElements = 0;
   /** Parts armed for the current view and not yet run, abandoned, or dropped. */

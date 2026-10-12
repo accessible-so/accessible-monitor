@@ -197,12 +197,15 @@ function wire(opts: StartOptions, win: Window & Flagged, doc: Document, life: Li
       try {
         // The largest measured ratio any page of the session has produced: a heavier page raises it, a lighter one never lowers it.
         const stored = store.get<Partial<Record<DocCostPartName, number>>>(LEARNED_KEY) ?? {};
+        // Start from what is stored (another collector on the origin may have written a part this one never measured).
         const merged: Record<string, number> = {};
+        for (const [part, v] of Object.entries(stored)) {
+          if (typeof v === 'number' && Number.isFinite(v) && v > 0) merged[part] = v;
+        }
         for (const part of Object.keys(learned) as DocCostPartName[]) {
           const mine = learned[part];
           if (mine === undefined) continue;
-          const old = stored[part];
-          merged[part] = typeof old === 'number' && Number.isFinite(old) ? Math.max(old, mine) : mine;
+          merged[part] = Math.max(merged[part] ?? 0, mine);
         }
         store.set(LEARNED_KEY, merged);
       } catch (err) { debug('learned store failed', err); }

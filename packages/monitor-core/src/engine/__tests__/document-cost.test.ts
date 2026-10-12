@@ -605,7 +605,7 @@ describe('Engine document-cost scheduling', () => {
     }
   });
 
-  it('calibrates as medium when persisted multipliers push a part over the window', async () => {
+  it('calibrates as medium when persisted measured ratios push a part over the window', async () => {
     document.body.innerHTML = '<main><p>small</p></main>';
     const { axe, now } = costedAxe({ page: 10, grid: 20, region: 20, chunk: 5 });
     const fast = build(axe, { gate: manualGate(), now });
@@ -747,10 +747,12 @@ describe('Engine document-cost scheduling', () => {
         return base.run(context, options);
       },
     };
-    const { engine, scheduler } = build(axe);
+    const seen: Record<string, number>[] = [];
+    const { engine, scheduler } = build(axe, { onLearned: (l) => seen.push(l) });
     engine.scanFull();
     await micro();
     await scheduler.drain({ first: true });
+    expect(seen.some((l) => 'grid' in l), 'a failed run measures nothing').toBe(false);
     const perf = scheduler.perf();
     for (const r of DOCUMENT_COST_PARTS[0]!.rules) expect(perf.skipped).toContain(r);
     for (const r of DOCUMENT_COST_PARTS[0]!.rules) expect(perf.pending ?? []).not.toContain(r);
