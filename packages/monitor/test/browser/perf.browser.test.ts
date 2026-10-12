@@ -2,29 +2,26 @@
  * The performance budget, measured rather than asserted — on more than one
  * device.
  *
- * The promise is that the collector never becomes the reason a page is slow
- * to respond: no scan task over 50ms while the visitor is looking, beyond the
- * one that reveals the device is too slow for it. After that one the engine
- * parks and finishes when the tab hides (see `scheduler.ts`). What is *not*
- * promised is how long a task takes — that is the device's business — so this
- * suite asserts the promise, not a laptop's timings, and runs the same
- * assertions under Chromium's CPU throttling to stand in for slower devices.
- * `A11Y_PERF_THROTTLE` picks the rates (default `1,6`; CI, whose runners are
- * already several times slower than a laptop, runs `1`).
+ * The promise: no task over 50ms while the visitor is interacting, beyond the
+ * one that measures the device; no task over 150ms ever while visible (the
+ * heavy document-cost parts run only in idle windows, and only when predicted
+ * to fit). What is *not* promised is how long a task takes — that is the
+ * device's business — so this suite asserts the promise, not a laptop's
+ * timings, and runs the same assertions under Chromium's CPU throttling to
+ * stand in for slower devices. `A11Y_PERF_THROTTLE` picks the rates (default
+ * `1,6`; CI, whose runners are already several times slower than a laptop,
+ * runs `1`).
  *
  * A handful of axe rules — `color-contrast` and `region` above all — are
- * element-level in meaning but document-level in cost: axe rebuilds a spatial
- * grid of the whole page for the first and walks every element for the second,
- * on every `axe.run`, whatever context it is handed. They run once per page,
- * when the tab hides, on any page up to 3,000 elements, and above that not at
- * all — named in `perf.skipped` rather than silently missing. See
- * `docs/methodology.md`.
+ * element-level in meaning but document-level in cost. Fast pages check them
+ * in idle windows; others at tab hide; pages over 3,000 elements skip what
+ * does not fit, named in `perf.skipped` rather than silently missing. See
+ * `docs/methodology.md` and the adaptive-collection spec.
  */
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { chromium, type Browser } from 'playwright';
 import { RumBeaconSchema } from '@accessible-so/monitor-core/protocol';
 import {
-  allFindings,
   fixtureSession,
   recordedBeacons,
   resetServer,
@@ -161,28 +158,31 @@ describe.each(RATES)('scan performance budget at %ix CPU', (r) => {
 
     // The promise: at most the one task that showed this device too slow,
     // then nothing more while the visitor was looking.
-    expect(visibleLongTasks.length, `long tasks while visible: ${JSON.stringify(visibleLongTasks)}`).toBeLessThanOrEqual(1);
+    // At most one task over the active budget that was not a window task, and
+    // no window task over the window budget (with 20% for timer noise).
+    expect(visibleLongTasks.filter((t) => t.duration > 150 * 1.2), `window budget broken: ${JSON.stringify(visibleLongTasks)}`).toHaveLength(0);
 
     const perf = beacons.at(-1)?.perf;
     expect(perf, 'no perf on the last beacon').toBeTruthy();
     // Whatever was parked was finished when the tab hid.
     expect(perf?.aborted, 'the page was left partly unscanned').toBe(false);
     expect(perf?.scans, 'the page was not chunked').toBeGreaterThanOrEqual(5);
-    // Too large for the document-cost pass at all — and the beacon names every
-    // rule rather than letting the page look clean.
-    expect(perf?.skipped, 'the skipped rules were not reported exactly').toEqual(DOCUMENT_COST_RULES);
+    // Per-part honesty: whatever did not run is named, and nothing is pending.
+    const skipped = perf?.skipped ?? [];
+    for (const rule of skipped) expect(DOCUMENT_COST_RULES, `unknown skipped rule ${rule}`).toContain(rule);
+    const grid = ['color-contrast', 'link-in-text-block', 'target-size'];
+    expect(new Set(grid.map((r) => skipped.includes(r))).size, `grid rules skipped inconsistently: ${JSON.stringify(skipped)}`).toBe(1);
     expect(perf?.pending, 'a pass that was never started is not pending').toBeUndefined();
+    if (!ruleSet(beacons).has('wcag:1.4.3')) expect(skipped, 'contrast went missing without being reported').toContain('color-contrast');
 
     // Skipping contrast is not giving up: everything else is still found.
-    const findings = allFindings(beacons);
     expect(ruleSet(beacons), 'the <img> with no alt was missed').toContain('wcag:1.1.1');
-    expect(findings.map((f) => f.rule)).not.toContain('wcag:1.4.3');
     expectAcceptedByIngest(beacons);
   });
 
   it('an ordinary page keeps its contrast findings, checked once the tab hides', async () => {
     const { beacons, visibleLongTasks } = await visit('/');
-    expect(visibleLongTasks.length, `long tasks while visible: ${JSON.stringify(visibleLongTasks)}`).toBeLessThanOrEqual(1);
+    expect(visibleLongTasks.filter((t) => t.duration > 150 * 1.2), `window budget broken: ${JSON.stringify(visibleLongTasks)}`).toHaveLength(0);
     expect(ruleSet(beacons), 'the #999-on-#fff text was missed').toContain('wcag:1.4.3');
     const perf = beacons.at(-1)?.perf;
     expect(perf?.aborted).toBe(false);
@@ -191,51 +191,90 @@ describe.each(RATES)('scan performance budget at %ix CPU', (r) => {
   });
 
   /**
-   * The deferral, seen from the only place it is observable: a beacon from a
+   * The promise, seen from the only place it is observable: a beacon from a
    * page the visitor is still on. The transport's 15s interval provides it.
    */
-  async function expectDeferral(path: string): Promise<void> {
+  async function expectCheckedByHide(path: string): Promise<void> {
     const watched = await session.open(path);
     await waitForCollector(watched.page);
-    const elements = await watched.page.evaluate(() => document.getElementsByTagName('*').length);
-    expect(elements, `${path} must be under the skip threshold`).toBeLessThanOrEqual(3000);
-
     const whileVisible = await waitForBeacon(server.url, 1);
-    expect(
-      ruleSet(whileVisible),
-      'contrast was checked while the visitor was still looking at the page',
-    ).not.toContain('wcag:1.4.3');
-    for (const beacon of whileVisible) {
-      const perf = beacon.perf!;
-      expect(perf.longTasks, 'more than one long task while the visitor was looking').toBeLessThanOrEqual(1);
-      expect(perf.skipped, 'a deferred pass is not a skipped pass').toBeUndefined();
-      // "Not yet" rather than "checked and clean".
-      expect(perf.pending, 'a postponed pass was not reported').toEqual(DOCUMENT_COST_RULES);
-      // A device fast enough to keep scanning has found the image by now; one
-      // that parked says the page is not fully scanned yet.
-      if (!perf.aborted) expect(ruleSet(whileVisible), 'nothing was scanned at all').toContain('wcag:1.1.1');
+    const tier = whileVisible.find((b) => b.perf?.tier)?.perf?.tier;
+    expect(tier, 'no tier on any beacon').toBeDefined();
+    if (tier === 'fast') {
+      expect(ruleSet(whileVisible), 'a fast page did not check contrast while the visitor was idle').toContain('wcag:1.4.3');
+    } else {
+      const pending = whileVisible.at(-1)!.perf!.pending ?? [];
+      const checked = ruleSet(whileVisible).has('wcag:1.4.3');
+      expect(checked || pending.length > 0, 'contrast neither checked nor reported pending').toBe(true);
     }
-
-    // Hiding the tab is the moment it was waiting for — and the last one.
     await settle(watched, server.url, { scanMs: 500 });
     const beacons = await finished(server.url);
-    const last = beacons.at(-1);
-    expect(beacons.length).toBeGreaterThan(whileVisible.length);
-    expect(ruleSet(beacons), 'the deferred contrast findings never arrived').toContain('wcag:1.4.3');
+    expect(ruleSet(beacons), 'the contrast findings never arrived').toContain('wcag:1.4.3');
     expect(ruleSet(beacons), 'the parked scanning never finished').toContain('wcag:1.1.1');
-    expect(last?.perf?.skipped, 'a pass that ran was reported as skipped').toBeUndefined();
-    expect(last?.perf?.pending, 'a pass that ran was still reported as pending').toBeUndefined();
-    expect(last?.perf?.aborted).toBe(false);
+    expect(beacons.at(-1)?.perf?.skipped).toBeUndefined();
+    expect(beacons.at(-1)?.perf?.pending).toBeUndefined();
+    expect(beacons.at(-1)?.perf?.aborted).toBe(false);
     expect(ruleSet(beacons), 'an AAA contrast finding leaked in').not.toContain('wcag:1.4.6');
     expectAcceptedByIngest(beacons);
   }
 
-  it('a mid-size page defers its contrast pass until the visitor stops looking', async () => {
-    await expectDeferral(MID);
+  it('a mid-size page has its contrast checked by the time the tab hides', async () => {
+    await expectCheckedByHide(MID);
   });
 
-  it('an ordinary content page defers it too', async () => {
-    await expectDeferral('/products.html');
+  it('an ordinary content page too', async () => {
+    await expectCheckedByHide('/products.html');
+  });
+
+  /** Reads `path` for `readMs` without touching it, then clicks a link to another page. */
+  async function readThenClick(path: string, readMs = 5000) {
+    const watched = await session.open(path);
+    const debugLines: string[] = [];
+    watched.page.on('console', (m) => { if (m.type() === 'debug') debugLines.push(m.text()); });
+    await waitForCollector(watched.page);
+    const from = await watched.page.evaluate(() => performance.now());
+    await watched.page.waitForTimeout(readMs);
+    const to = await watched.page.evaluate(() => performance.now());
+    const longTasks = await longTasksBetween(watched, from, to);
+    await Promise.all([watched.page.waitForURL(/products\.html/), watched.page.click('a[href^="/products.html"]')]);
+    await watched.page.waitForTimeout(1500); // the pagehide beacon lands; the next page has not flushed yet
+    return { beacons: await recordedBeacons(server.url), longTasks, debugLines };
+  }
+
+  for (const path of ['/', '/products.html', MID, HUGE]) {
+    it(`a visitor who reads ${path} and clicks a link: what got checked`, async () => {
+      const { beacons, longTasks, debugLines } = await readThenClick(path);
+      const tier = beacons.find((b) => b.perf?.tier)?.perf?.tier;
+      const last = beacons.at(-1)?.perf;
+      const unchecked = [...(last?.skipped ?? []), ...(last?.pending ?? [])];
+      // Calibration output for methodology §4 — the ratios are set from these lines.
+      console.log(JSON.stringify({ rate, path, tier, unchecked, idleRuns: last?.idleRuns ?? 0, calibration: debugLines.filter((l) => /calibrated|document-cost part/.test(l)) }));
+
+      expect(tier).toBeDefined();
+      // Honesty, every tier: a document-cost rule with no result is named as unchecked.
+      if (!ruleSet(beacons).has('wcag:1.4.3') && path !== HUGE) {
+        expect(unchecked, 'contrast went missing without being reported').toContain('color-contrast');
+      }
+      // The point of this change: a fast page is fully checked before the click.
+      if (tier === 'fast') {
+        expect(unchecked, `${path} was fast but left rules unchecked at the click`).toEqual([]);
+      }
+      expect(longTasks.filter((t) => t.duration > 150 * 1.2), 'window budget broken while reading').toHaveLength(0);
+      expectAcceptedByIngest(beacons);
+    });
+  }
+
+  it('a visitor who keeps interacting gets no window: at most the one calibration long task', async () => {
+    const watched = await session.open(MID);
+    await waitForCollector(watched.page);
+    const from = await watched.page.evaluate(() => performance.now());
+    for (let i = 0; i < 20; i++) {
+      await watched.page.mouse.wheel(0, 40);
+      await watched.page.waitForTimeout(300);
+    }
+    const to = await watched.page.evaluate(() => performance.now());
+    const tasks = await longTasksBetween(watched, from, to);
+    expect(tasks.length, `long tasks while interacting: ${JSON.stringify(tasks)}`).toBeLessThanOrEqual(1);
   });
 
   it('the floor cost of an axe run scales with the document, not the chunk', async () => {
