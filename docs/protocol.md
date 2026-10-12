@@ -130,7 +130,7 @@ report is not sent at all.
 | `pending` | `string[]` (optional) | Rules whose pass has been **postponed and has not happened yet** — the document-cost set on a mid-size page, waiting for the tab to hide. Present on every beacon sent while the pass is still waiting. **A rule listed here has not been checked yet**; it is not a skipped rule and not a clean one. At most 16 ids of at most 64 characters. |
 | `skipped` | `string[]` (optional) | Rules the engine did not run, for cost — the document-cost set on a page too large to afford it, or a pass that was deferred to the tab-hidden moment and never got one (the page unloaded instead). At most four ids, and a rule leaves the list if a later pass on the same page does run it. **A rule listed here was not checked; its absence from `findings` says nothing.** See [methodology §4.1](./methodology.md#41-contrast-on-large-pages). |
 | `tier` | `'fast' \| 'medium' \| 'slow'` (optional) | This page view's tier, from its first run: `fast` when every task fits an idle window, `medium` when a document-cost part does not, `slow` when even one chunk is a long task. Absent until the first run has been measured. See [methodology §4.2](./methodology.md#42-predicting-a-parts-cost). |
-| `idleRuns` | `number` (optional) | Tasks run in idle windows (more than the 50ms budget allowed while the visitor was active). Absent when none ran. |
+| `idleRuns` | `number` (optional) | Tasks started in an idle window. Absent when none ran. |
 
 `skipped` and `pending` are disjoint: a rule is in at most one of them. It moves
 from `pending` to `skipped` when the pass is given up on, and leaves both when

@@ -246,7 +246,7 @@ records the rules as not yet checked there rather than as passed.
 ### 4.2 Predicting a part's cost
 
 Every prediction starts from the page's **first run**: the page-level
-`axe.run`, made once per view, whose cost is mostly the document-wide floor axe
+`axe.run`, made once per page load, whose cost is mostly the document-wide floor axe
 pays on every run. It measures this page on this device.
 
     predicted ms = firstRunMs × (base + perThousand × elements / 1000) × learned
@@ -262,12 +262,15 @@ multiple of the first run: contrast builds a grid over the whole page, so its
 cost grows with the page while the first run barely does. At 1x, the grid part
 cost 3.7x the first run at 120 elements, 7.1x at 419 and 17.6x at 1,121; no one
 ratio fits those. The coefficients are a least-squares fit to those points
-rounded up (grid: ~2 + 14 per thousand elements), and `region` bounds all four
-measured pages. Where the measurements disagreed with the fit, the fit was
-raised, never the bound lowered: an underestimate puts a long task in front of
+rounded up (grid: ~2 + 14 per thousand elements); `region`'s bounds all four
+points of that first calibration. The policy when a later measurement
+disagrees: raise the coefficients, never lower the 180 ms bound. (No
+adjustment was needed this time.) An underestimate puts a long task in front of
 the visitor, an overestimate only defers work to tab-hide.
 
-`elements` is the body's count when the view was armed. `learned` starts at 1
+`elements` is the body's count when the view was armed, and the tier is
+recomputed from it on each client-side route change; the first run is not
+repeated. `learned` persists across views for the life of the page load. It starts at 1
 and, after a part runs, becomes the larger of itself and `actualMs / modelMs`,
 so a page that overruns once is never under-predicted again for the rest of its
 life.
@@ -277,8 +280,8 @@ The **tier** names what the predictions said, per view (`perf.tier`):
 | Tier | Rule | Meaning |
 |---|---|---|
 | `fast` | first run ≤ 50 ms and every part predicted ≤ 150 ms | everything fits |
-| `medium` | first run ≤ 50 ms, some part predicted > 150 ms | chunks fit; that part waits for tab-hide |
-| `slow` | first run > 50 ms | even one chunk is a long task; the page parks |
+| `medium` | first run ≤ 50 ms, some part predicted > 150 ms | chunks fit; a part that does not fit waits for tab-hide, or is dropped on a page over 3,000 elements |
+| `slow` | first run > 50 ms | even one chunk is a long task; the page parks while the visitor is active (windows still run) |
 
 The **session hint** is the slowest tier any page of the session has measured
 (`sessionStorage`). It decides only when the first run itself happens: on a
@@ -294,8 +297,8 @@ any moment, so when that work is long it does **not** go first:
 
 1. **flush** everything the collector already has, with its one retry — but
    only when the work ahead is long: a queue to finish, or a page over 250
-   elements (the pass costs ~66ms on a 420-element page on a fast laptop and
-   ~250ms at a mid-range phone's speed). A small page's pass runs first and
+   elements (the grid part costs ~100ms on a 412-element page on a fast laptop and
+   several times that at a mid-range phone's speed). A small page's pass runs first and
    everything leaves in one beacon, because every beacon counts against the
    site's daily cap;
 2. run the document-cost parts still pending;
@@ -357,7 +360,10 @@ first run alone is 160 ms.
 
 At 1x the grid part cost 51 ms on 112 elements (predicted 45) and 97 ms on 412
 (predicted 123); `region` cost 70 ms on 5,338 elements (predicted 128). The
-model errs high; no part in the suite exceeded 180 ms.
+model under-predicted on two 1x pages: the grid part on `/` (51 ms against
+45 predicted, 13% over) and `region` on `/mid.html` (21 ms against 16, 28%
+over). The `learned` multiplier corrects each after its first run, and every
+part that ran while the visitor was looking stayed within the 180 ms bound.
 
 ### What is not reported
 

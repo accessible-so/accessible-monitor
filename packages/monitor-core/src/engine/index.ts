@@ -176,6 +176,12 @@ export function Engine(opts: EngineOptions): EngineApi {
     if (!body) return;
     const gen = ++docGen;
     armedElements = countElements(body);
+    if (firstRunMs !== null) {
+      // The tier depends on the page's size, which a route change replaces.
+      const tier = pageTier(firstRunMs, armedElements);
+      scheduler.setTier(tier);
+      try { opts.onTier?.(tier); } catch { /* a callback never breaks a scan */ }
+    }
     partsAtDrain = armedElements > contrastDeferMax ? 'drop' : 'first';
     for (const part of DOCUMENT_COST_PARTS) {
       pendingParts.add(part.name);

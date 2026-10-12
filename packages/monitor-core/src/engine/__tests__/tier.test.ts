@@ -28,7 +28,6 @@ describe('page tier', () => {
     expect(pageTier(50, 10)).toBe('medium');
   });
   it('is fast when a part predicts exactly the idle boundary (150 ms)', () => {
-    // 10 ms first run, grid base 3 + 12/1000 x 15... pick a cost that lands on 150 exactly.
     expect(pageTier(10, 0, { grid: { base: 15, perThousand: 0 }, region: { base: 1, perThousand: 0 } })).toBe('fast');
     expect(pageTier(10, 0, { grid: { base: 15.1, perThousand: 0 }, region: { base: 1, perThousand: 0 } })).toBe('medium');
   });

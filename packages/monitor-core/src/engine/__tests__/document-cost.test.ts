@@ -459,6 +459,18 @@ describe('Engine document-cost scheduling', () => {
     expect(engine.predictedPartMs('grid')).toBe(gridBefore);
   });
 
+  it('recomputes the tier when a route change re-arms on a bigger page', async () => {
+    document.body.innerHTML = '<main><p>small</p></main>';
+    const { axe, now } = costedAxe({ page: 12, grid: 30, region: 20, chunk: 5 });
+    const { engine, scheduler } = build(axe, { gate: manualGate(), now });
+    engine.scanFull();
+    await micro();
+    expect(scheduler.perf().tier).toBe('fast');
+    document.body.innerHTML = `<main>${'<p>x</p>'.repeat(1500)}</main>`;
+    engine.scanDocumentCost();
+    expect(scheduler.perf().tier).toBe('medium');
+  });
+
   it('drops the parts at drain on a page over the element ceiling, reporting them skipped', async () => {
     const axe = fakeAxe();
     const { engine, scheduler } = build(axe, { contrastDeferMaxElements: 1 });
