@@ -23,6 +23,7 @@ import {
 import type { AxeLike, AxeResultsLike } from '../axe-runner';
 import { Engine } from '../index';
 import { Scheduler } from '../scheduler';
+import { RumBeaconSchema } from '../../protocol/schema';
 import type { IdleGateApi } from '../idle-gate';
 
 interface Call {
@@ -550,6 +551,61 @@ describe('Engine document-cost scheduling', () => {
     expect(seen.length).toBeGreaterThan(0);
     expect(seen.at(-1)!.region).toBeCloseTo(60 / (regionBase / 1), 0);
     expect(seen.at(-1)!.region).toBeGreaterThan(1);
+  });
+
+  it('calibrates as medium when persisted multipliers push a part over the window', async () => {
+    document.body.innerHTML = '<main><p>small</p></main>';
+    const { axe, now } = costedAxe({ page: 10, grid: 20, region: 20, chunk: 5 });
+    const fast = build(axe, { gate: manualGate(), now });
+    fast.engine.scanFull();
+    await micro();
+    expect(fast.scheduler.perf().tier).toBe('fast');
+    const c = costedAxe({ page: 10, grid: 20, region: 20, chunk: 5 });
+    const slowish = build(c.axe, { gate: manualGate(), now: c.now, learned: { grid: 10 } });
+    slowish.engine.scanFull();
+    await micro();
+    expect(slowish.scheduler.perf().tier).toBe('medium');
+  });
+
+  it('a failed page-level run leaves the page not fully scanned, and its beacon still validates', async () => {
+    document.body.innerHTML = `<main>${'<p>x</p>'.repeat(40)}</main>`;
+    const base = fakeAxe();
+    const axe = {
+      calls: base.calls,
+      run(context: Element | Document, options: Parameters<AxeLike['run']>[1]) {
+        if ((options as Call['options']).runOnly?.values === PAGE_LEVEL_RULES) return Promise.reject(new Error('boom'));
+        return base.run(context, options);
+      },
+    };
+    const { scheduler, engine } = build(axe, { contrastDeferMaxElements: 20 });
+    engine.scanFull();
+    await micro();
+    await scheduler.drain();
+    const perf = scheduler.perf();
+    expect(perf.aborted).toBe(true);
+    expect(perf.skipped).toEqual(DOCUMENT_COST_RULES);
+    const beacon = {
+      v: 1, k: 'acc_rum_' + 'a'.repeat(24), s: 'b'.repeat(32), c: '0.2.0', sent: 1,
+      ctx: { vw: 1280, vh: 800, dpr: 2, zoom: 1, fontPx: 16, navigationMode: 'unknown' }, perf,
+    };
+    expect(RumBeaconSchema.safeParse(beacon).success).toBe(true);
+  });
+
+  it('a failed chunk run leaves the page not fully scanned, even after a full drain', async () => {
+    document.body.innerHTML = '<main><p>small</p></main>';
+    const base = fakeAxe();
+    const axe = {
+      calls: base.calls,
+      run(context: Element | Document, options: Parameters<AxeLike['run']>[1]) {
+        if ((options as Call['options']).runOnly?.type === 'tag') return Promise.reject(new Error('boom'));
+        return base.run(context, options);
+      },
+    };
+    const { scheduler, engine } = build(axe);
+    engine.scanFull();
+    await micro();
+    await scheduler.drain();
+    expect(scheduler.perf().aborted).toBe(true);
   });
 
   it('recomputes the tier when a route change re-arms on a bigger page', async () => {

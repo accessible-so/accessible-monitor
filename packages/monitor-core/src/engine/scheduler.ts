@@ -126,6 +126,8 @@ export interface SchedulerApi {
   /** With { first: true }, runs only the atDrain:'first' jobs (and drops the 'drop' ones). */
   drain(options?: { first?: boolean }): Promise<void>;
   setTier(tier: PageTier): void;
+  /** A scan run failed: the page is not fully scanned, and `perf().aborted` stays true for the rest of the page (a drain does not clear it). */
+  markIncomplete(): void;
   /** Drop queued work that will not get to run, and say so: the page was not fully scanned. */
   abandon(): void;
   perf(): SchedulerPerf;
@@ -168,6 +170,7 @@ export function Scheduler(options: SchedulerOptions): SchedulerApi {
   let waitingForWindow = false;
   let idleRuns = 0;
   let windowOverruns = 0;
+  let incomplete = false;
   let tier: PageTier | undefined;
   let current: Promise<void> | null = null;
   let scans = 0;
@@ -184,7 +187,7 @@ export function Scheduler(options: SchedulerOptions): SchedulerApi {
 
   function perf(): SchedulerPerf {
     const unfinished = parked && (scanQueued() || current !== null);
-    const stats: SchedulerPerf = { scans, longTasks: overBudget, maxTaskMs, aborted: aborted || unfinished };
+    const stats: SchedulerPerf = { scans, longTasks: overBudget, maxTaskMs, aborted: aborted || unfinished || incomplete };
     if (skipped.size > 0) stats.skipped = Array.from(skipped);
     if (pending.size > 0) stats.pending = Array.from(pending);
     if (tier) stats.tier = tier;
@@ -318,9 +321,12 @@ export function Scheduler(options: SchedulerOptions): SchedulerApi {
       if (!choice) { running = false; waitForWindow(); return; }
       const [next] = queue.splice(choice.index, 1);
       if (choice.inWindow) idleRuns++;
+      // Only a task the model made a promise about can be said to have under-predicted.
+      let predicted = false;
+      try { const p = next!.predictMs?.(); predicted = typeof p === 'number' && Number.isFinite(p); } catch { predicted = false; }
       current = runJob(next!.job).then((ms) => {
         current = null;
-        if (choice.inWindow && typeof ms === 'number' && ms > idleBudgetMs) windowOverruns++;
+        if (choice.inWindow && predicted && typeof ms === 'number' && ms > idleBudgetMs) windowOverruns++;
         finish(ms, next!.exempt || choice.inWindow);
       });
     });
@@ -404,6 +410,7 @@ export function Scheduler(options: SchedulerOptions): SchedulerApi {
     },
     perf,
     setTier(next: PageTier): void { tier = next; },
+    markIncomplete(): void { incomplete = true; },
     stop(): void {
       stopped = true;
       queue = [];

@@ -48,10 +48,11 @@ export function pageTier(
   costs: Readonly<Record<DocCostPartName, { base: number; perThousand: number }>> = PART_COST,
   activeBudgetMs = ACTIVE_BUDGET_MS,
   idleBudgetMs = IDLE_BUDGET_MS,
+  learned: Partial<Record<DocCostPartName, number>> = {},
 ): PageTier {
   if (firstRunMs <= 0) return 'medium'; // coarsened timers: unmeasured, never 'fast'
   if (firstRunMs > activeBudgetMs) return 'slow';
-  const fits = (Object.keys(costs) as DocCostPartName[]).every((p) => modelPartMs(firstRunMs, elements, costs[p]) <= idleBudgetMs);
+  const fits = (Object.keys(costs) as DocCostPartName[]).every((p) => modelPartMs(firstRunMs, elements, costs[p]) * (learned[p] ?? 1) <= idleBudgetMs);
   return fits ? 'fast' : 'medium';
 }
 

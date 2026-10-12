@@ -126,7 +126,7 @@ export function Engine(opts: EngineOptions): EngineApi {
     scheduler.schedule(async () => {
       if (stopped) return 0;
       const { violations, ms, ok } = await runChunk(axe, chunk, opts.now);
-      if (ok) lastChunkMs = ms;
+      if (ok) lastChunkMs = ms; else scheduler.markIncomplete();
       if (!stopped) report(violations);
       return ms;
     }, elements, { predictMs: chunkPredict, idleOnly });
@@ -141,7 +141,7 @@ export function Engine(opts: EngineOptions): EngineApi {
       const first = chunks[0];
       if (!first) return 0;
       const { violations, ms, ok } = await runChunk(axe, first, opts.now);
-      if (ok) lastChunkMs = ms;
+      if (ok) lastChunkMs = ms; else scheduler.markIncomplete();
       if (!stopped) report(violations);
       return ms;
     }, countElements(root) + 1, { predictMs: chunkPredict, idleOnly });
@@ -193,7 +193,7 @@ export function Engine(opts: EngineOptions): EngineApi {
     armedElements = countElements(body);
     if (firstRunMs !== null) {
       // The tier depends on the page's size, which a route change replaces.
-      const tier = pageTier(firstRunMs, armedElements);
+      const tier = pageTier(firstRunMs, armedElements, PART_COST, undefined, undefined, learned);
       scheduler.setTier(tier);
       try { opts.onTier?.(tier); } catch { /* a callback never breaks a scan */ }
     }
@@ -257,9 +257,10 @@ export function Engine(opts: EngineOptions): EngineApi {
         if (!ok) {
           // A failed run's time says nothing about the page: leave it uncalibrated.
           debug('calibration failed');
+          scheduler.markIncomplete();
         } else if (firstRunMs === null) {
           firstRunMs = ms;
-          const tier = pageTier(ms, armedElements);
+          const tier = pageTier(ms, armedElements, PART_COST, undefined, undefined, learned);
           scheduler.setTier(tier);
           debug('calibrated', { firstRunMs: ms, elements: armedElements, tier });
           try { opts.onTier?.(tier); } catch { /* a callback never breaks a scan */ }

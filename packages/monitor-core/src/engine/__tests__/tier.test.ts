@@ -31,6 +31,11 @@ describe('page tier', () => {
     expect(pageTier(10, 0, { grid: { base: 15, perThousand: 0 }, region: { base: 1, perThousand: 0 } })).toBe('fast');
     expect(pageTier(10, 0, { grid: { base: 15.1, perThousand: 0 }, region: { base: 1, perThousand: 0 } })).toBe('medium');
   });
+  it('lets learned multipliers decide what fits', () => {
+    expect(pageTier(10, 0)).toBe('fast'); // grid predicts 30 ms
+    expect(pageTier(10, 0, PART_COST, 50, 150, { grid: 3 })).toBe('fast'); // 90 ms
+    expect(pageTier(10, 0, PART_COST, 50, 150, { grid: 6 })).toBe('medium'); // 180 ms
+  });
   it('uses the fixture coefficients', () => {
     expect(PART_COST.grid).toEqual({ base: 3, perThousand: 15 });
     expect(PART_COST.region).toEqual({ base: 0.5, perThousand: 0.8 });
