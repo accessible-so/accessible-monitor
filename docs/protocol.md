@@ -164,7 +164,7 @@ unsampled one. `credentials: 'omit'` — no cookies are sent.
 | `sampleRate` | `number` | 0–1. The decision is made once per session and is sticky. |
 | `boosted` | `{ pattern, rate }[]` | Per-route-pattern rates that may **raise** the base rate for matching paths. |
 | `endpoint` | `string` | Where beacons go. |
-| `minCollector` | `string` | The oldest collector version the server will accept. |
+| `minCollector` | `string` | The oldest collector version the server will accept. The loader served from `https://accessible.so` loads this version's engine (`/rum/<minCollector>/engine.js`, only if it is `x.y.z`). |
 
 ## Ingest (`POST /api/rum/ingest`)
 

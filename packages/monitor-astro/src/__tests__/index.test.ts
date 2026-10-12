@@ -62,6 +62,18 @@ describe('accessibleMonitor', () => {
     expect(injected[1]).toEqual(['page', 'import "virtual:accessible-monitor/routes";']);
   });
 
+  it("defaults to Accessible's hosted loader with no data-endpoint, and takes a self-hosted src", () => {
+    const snippet = (o: Parameters<typeof accessibleMonitor>[0]): string => {
+      const injected: string[] = [];
+      (accessibleMonitor(o).hooks['astro:config:setup'] as any)({ injectScript: (_: string, c: string) => injected.push(c), updateConfig: () => {} });
+      return injected[0]!;
+    };
+    const plain = snippet({ siteKey: 'acc_rum_k' });
+    expect(plain).toContain('"https://accessible.so/rum/loader.js"');
+    expect(plain).not.toContain('data-endpoint');
+    expect(snippet({ siteKey: 'acc_rum_k', src: 'https://cdn.example/l.js' })).toContain('"https://cdn.example/l.js"');
+  });
+
   it('serves the routes Astro resolved, with the configured base, from the virtual module', () => {
     let plugin: any;
     const integration = accessibleMonitor({ siteKey: 'acc_rum_k' });

@@ -9,9 +9,15 @@
     const key = s.getAttribute('data-site-key');
     if (!key) return;
     const src = new URL(s.src, location.href);
-    const endpoint = (s.getAttribute('data-endpoint') || src.origin).replace(/\/$/, '');
-    const engine =
-      s.getAttribute('data-engine') || src.href.replace(/loader(\.min)?\.js(\?.*)?$/, 'engine.js');
+    const endpoint = (s.getAttribute('data-endpoint') || 'https://app.accessible.so').replace(/\/$/, '');
+    // Served by Accessible, the engine is the version the app's config names
+    // (`/rum/<version>/engine.js`), so it always matches what ingest accepts.
+    // Self-hosted, it is the file next to the loader.
+    const engineFor = (cfg: any) =>
+      s.getAttribute('data-engine') ||
+      (src.origin === 'https://accessible.so' && /^\d+\.\d+\.\d+$/.test(cfg.minCollector)
+        ? `${src.origin}/rum/${cfg.minCollector}/engine.js`
+        : src.href.replace(/loader(\.min)?\.js(\?.*)?$/, 'engine.js'));
     const debug = /[?&]a11y_debug=1(&|$)/.test(location.search);
     const ss = (() => {
       try {
@@ -61,7 +67,7 @@
     const sid = (st && st.s) || hex();
     const inject = (cfg: any) => {
       const el = d.createElement('script');
-      el.src = engine;
+      el.src = engineFor(cfg);
       el.async = true;
       el.onload = () => {
         try {

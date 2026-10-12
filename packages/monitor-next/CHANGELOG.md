@@ -2,6 +2,7 @@
 
 ## 0.1.0
 
+- The loader comes from `https://accessible.so/rum/loader.js`, or the `src` prop to self-host it; a custom `endpoint` serves the loader too. `data-endpoint` is rendered only for a non-default endpoint.
 - `routePatternFor(pathname, params)` and `RouteMap` — reconstructs the route pattern behind a concrete pathname (`/blog/[slug]`, not `/blog/hello-world`) from the params the App Router already resolved, and keeps a bounded (default 50) LRU of every path the visitor has been on so a finding raised after a client-side navigation away still resolves to a pattern when its beacon is sent.
 - `createNextAdapter(map)` and `registerAdapter(adapter)` — build a `CollectorAdapter` (`@accessible-so/monitor-core`) backed by the map, and publish it on `window.__accessibleAdapter`, the slot the engine reads lazily on every attribution lookup.
 - `AccessibleMonitor` — the App Router component. Render once in the root layout: it registers the adapter, keeps the route map current on every navigation, and renders the loader `<Script>`. It never starts the engine itself; sampling is still the loader's decision. The map is keyed on `window.location.pathname` — the path the collector looks a pattern up by — rather than on `usePathname()`, so `basePath`, `trailingSlash` and i18n locale prefixes all resolve; the pattern itself stays the app route (`/products/[slug]`, never `/x/products/[slug]`).

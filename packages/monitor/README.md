@@ -20,7 +20,7 @@ customer's page.
 ```html
 <script
   async
-  src="https://cdn.example.com/rum/loader.js"
+  src="https://accessible.so/rum/loader.js"
   data-site-key="acc_rum_xxxxxxxxxxxxxxxxxxxxxxxx"
 ></script>
 ```
@@ -37,8 +37,8 @@ Optional attributes on the loader's `<script>` tag:
 | Attribute | Purpose |
 |---|---|
 | `data-site-key` | Required. Identifies the site to the config endpoint. |
-| `data-endpoint` | Overrides the config/beacon origin (defaults to the loader script's own origin). |
-| `data-engine` | Overrides the engine bundle URL (defaults to a sibling `engine.js` next to the loader). |
+| `data-endpoint` | Overrides the config/beacon origin (defaults to `https://app.accessible.so`). |
+| `data-engine` | Overrides the engine bundle URL. Defaults to the version the app's config names when the loader is served from `https://accessible.so`, else a sibling `engine.js` next to the loader. |
 | `data-disabled` | Presence disables the loader entirely — no fetch, no injection. |
 | `data-sample` | Dev override of the sample rate (0–1), bypassing the server-provided rate. |
 

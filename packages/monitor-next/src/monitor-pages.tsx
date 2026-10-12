@@ -6,7 +6,7 @@ import type { CollectorAdapter } from '@accessible-so/monitor-core';
 import { createNextAdapter, registerAdapter } from './adapter';
 import { basePrefix, pathKey, pathOnly } from './path-key';
 import { RouteMap } from './route-pattern';
-import { DEFAULT_ENDPOINT, type AccessibleMonitorProps } from './monitor';
+import { loaderAttributes, type AccessibleMonitorProps } from './monitor';
 
 /**
  * Pages Router counterpart to `AccessibleMonitor`. Render once in `_app`.
@@ -20,7 +20,7 @@ import { DEFAULT_ENDPOINT, type AccessibleMonitorProps } from './monitor';
  * app — and reading `.pathname` off that would throw into the host's render.
  * There, the loader still loads and findings simply carry no route pattern.
  */
-export function AccessibleMonitorPages({ siteKey, endpoint = DEFAULT_ENDPOINT }: AccessibleMonitorProps) {
+export function AccessibleMonitorPages(props: AccessibleMonitorProps) {
   const router = useRouter() as { pathname: string; asPath: string } | null;
   const map = useRef<RouteMap | null>(null);
   const adapter = useRef<CollectorAdapter | null>(null);
@@ -42,11 +42,6 @@ export function AccessibleMonitorPages({ siteKey, endpoint = DEFAULT_ENDPOINT }:
   });
 
   return (
-    <Script
-      src={`${endpoint}/rum/loader.js`}
-      data-site-key={siteKey}
-      data-endpoint={endpoint}
-      strategy="afterInteractive"
-    />
+    <Script {...loaderAttributes(props)} strategy="afterInteractive" />
   );
 }

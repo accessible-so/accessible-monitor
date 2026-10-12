@@ -4,12 +4,19 @@ import type { SerializedRoute } from './client';
 export type { SerializedRoute } from './client';
 
 export const DEFAULT_ENDPOINT = 'https://app.accessible.so';
+export const DEFAULT_LOADER_SRC = 'https://accessible.so/rum/loader.js';
 
 export interface AccessibleMonitorOptions {
   /** The site key from your domain's Install snippet, `acc_rum_…`. */
   siteKey: string;
-  /** Where the loader, config and beacons live. Defaults to Accessible's app. */
+  /** Where config is read and beacons are sent. Defaults to Accessible's app. */
   endpoint?: string;
+  /**
+   * The loader's URL, to self-host it (the engine is read from `engine.js` next
+   * to it). Defaults to Accessible's copy, or `<endpoint>/rum/loader.js` when
+   * `endpoint` is set.
+   */
+  src?: string;
 }
 
 const VIRTUAL_ID = 'virtual:accessible-monitor/routes';
@@ -32,12 +39,13 @@ export function serializeRoutes(routes: readonly IntegrationResolvedRoute[]): Se
  * Not processed by Vite, so plain ES5-safe script. The loader guards against
  * running twice itself (client-side navigation re-running head scripts).
  */
-export function loaderSnippet(endpoint: string, siteKey: string): string {
+export function loaderSnippet(endpoint: string, siteKey: string, src?: string): string {
+  const custom = endpoint !== DEFAULT_ENDPOINT;
   return (
     `(function(){var s=document.createElement('script');` +
-    `s.src=${JSON.stringify(`${endpoint}/rum/loader.js`)};s.async=true;` +
+    `s.src=${JSON.stringify(src ?? (custom ? `${endpoint}/rum/loader.js` : DEFAULT_LOADER_SRC))};s.async=true;` +
     `s.setAttribute('data-site-key',${JSON.stringify(siteKey)});` +
-    `s.setAttribute('data-endpoint',${JSON.stringify(endpoint)});` +
+    (custom ? `s.setAttribute('data-endpoint',${JSON.stringify(endpoint)});` : '') +
     `document.head.appendChild(s)})();`
   );
 }
@@ -72,7 +80,7 @@ export default function accessibleMonitor(options: AccessibleMonitorOptions): As
     name: '@accessible-so/monitor-astro',
     hooks: {
       'astro:config:setup': ({ injectScript, updateConfig }) => {
-        injectScript('head-inline', loaderSnippet(endpoint, siteKey));
+        injectScript('head-inline', loaderSnippet(endpoint, siteKey, options.src?.trim() || undefined));
         injectScript('page', `import ${JSON.stringify(VIRTUAL_ID)};`);
         updateConfig({
           vite: {

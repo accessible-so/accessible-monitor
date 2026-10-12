@@ -32,7 +32,8 @@ there is nothing to add per page or per layout.
 | Option | Default | |
 |---|---|---|
 | `siteKey` | (required) | Your site's `acc_rum_…` key. Public by design, and bound to your domain's origin. |
-| `endpoint` | `https://app.accessible.so` | Where the loader, config and beacons live. |
+| `endpoint` | `https://app.accessible.so` | Where config is read and beacons are sent. Set it only to point at another Accessible environment. |
+| `src` | `https://accessible.so/rum/loader.js` | The loader's URL, to self-host it (the engine is read from `engine.js` next to it). With a custom `endpoint` it defaults to `<endpoint>/rum/loader.js`. |
 
 ## What it does
 

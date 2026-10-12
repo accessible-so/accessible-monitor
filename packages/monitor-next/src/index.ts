@@ -8,5 +8,5 @@
 export { routePatternFor, RouteMap } from './route-pattern';
 export { createNextAdapter, registerAdapter } from './adapter';
 export type { CollectorAdapter } from '@accessible-so/monitor-core';
-export { AccessibleMonitor, DEFAULT_ENDPOINT, type AccessibleMonitorProps } from './monitor';
+export { AccessibleMonitor, DEFAULT_ENDPOINT, DEFAULT_LOADER_SRC, type AccessibleMonitorProps } from './monitor';
 export { AccessibleMonitorPages } from './monitor-pages';

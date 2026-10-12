@@ -8,10 +8,28 @@ import { basePrefix, pathKey } from './path-key';
 import { RouteMap, routePatternFor } from './route-pattern';
 
 export const DEFAULT_ENDPOINT = 'https://app.accessible.so';
+export const DEFAULT_LOADER_SRC = 'https://accessible.so/rum/loader.js';
 
 export interface AccessibleMonitorProps {
   siteKey: string;
+  /** Where config is read and beacons are sent. Defaults to Accessible's app. */
   endpoint?: string;
+  /**
+   * The loader's URL, to self-host it (the engine is read from `engine.js` next
+   * to it). Defaults to Accessible's copy, or `<endpoint>/rum/loader.js` when
+   * `endpoint` is set.
+   */
+  src?: string;
+}
+
+/** The loader tag's attributes; `data-endpoint` only when it is not the loader's own default. */
+export function loaderAttributes({ siteKey, endpoint = DEFAULT_ENDPOINT, src }: AccessibleMonitorProps) {
+  const custom = endpoint !== DEFAULT_ENDPOINT;
+  return {
+    src: src ?? (custom ? `${endpoint}/rum/loader.js` : DEFAULT_LOADER_SRC),
+    'data-site-key': siteKey,
+    ...(custom ? { 'data-endpoint': endpoint } : {}),
+  };
 }
 
 /**
@@ -27,7 +45,7 @@ export interface AccessibleMonitorProps {
  * never `/x/products/[slug]`): that is what the app's own file tree calls it,
  * and what aggregates should group by.
  */
-export function AccessibleMonitor({ siteKey, endpoint = DEFAULT_ENDPOINT }: AccessibleMonitorProps) {
+export function AccessibleMonitor(props: AccessibleMonitorProps) {
   const pathname = usePathname();
   const params = useParams() as Record<string, string | string[]> | null;
   const map = useRef<RouteMap | null>(null);
@@ -59,11 +77,6 @@ export function AccessibleMonitor({ siteKey, endpoint = DEFAULT_ENDPOINT }: Acce
   });
 
   return (
-    <Script
-      src={`${endpoint}/rum/loader.js`}
-      data-site-key={siteKey}
-      data-endpoint={endpoint}
-      strategy="afterInteractive"
-    />
+    <Script {...loaderAttributes(props)} strategy="afterInteractive" />
   );
 }

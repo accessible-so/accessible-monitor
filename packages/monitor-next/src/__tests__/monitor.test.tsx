@@ -22,7 +22,7 @@ vi.mock('next/script', () => ({
   default: (props: Record<string, unknown>) => React.createElement('script', props),
 }));
 
-import { AccessibleMonitor } from '../monitor';
+import { AccessibleMonitor, loaderAttributes } from '../monitor';
 import { AccessibleMonitorPages } from '../monitor-pages';
 
 interface AdapterWindow {
@@ -154,5 +154,18 @@ describe('AccessibleMonitorPages (Pages Router)', () => {
     expect(container.querySelector('script')?.getAttribute('src')).toBe(
       'https://ingest.test/rum/loader.js',
     );
+  });
+});
+
+describe('loaderAttributes', () => {
+  it("defaults to Accessible's hosted loader and leaves data-endpoint to the loader's own default", () => {
+    expect(loaderAttributes({ siteKey: 'k' })).toEqual({ src: 'https://accessible.so/rum/loader.js', 'data-site-key': 'k' });
+    expect(loaderAttributes({ siteKey: 'k', endpoint: 'https://app.accessible.so' })).toEqual({ src: 'https://accessible.so/rum/loader.js', 'data-site-key': 'k' });
+  });
+  it('a custom endpoint serves the loader too, unless src says otherwise', () => {
+    expect(loaderAttributes({ siteKey: 'k', endpoint: 'https://dev.example' })).toEqual({
+      src: 'https://dev.example/rum/loader.js', 'data-site-key': 'k', 'data-endpoint': 'https://dev.example',
+    });
+    expect(loaderAttributes({ siteKey: 'k', src: 'https://cdn.example/loader.js' })).toEqual({ src: 'https://cdn.example/loader.js', 'data-site-key': 'k' });
   });
 });

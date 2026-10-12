@@ -97,7 +97,7 @@ measurements.
 ```html
 <script
   async
-  src="https://cdn.example.com/rum/loader.js"
+  src="https://accessible.so/rum/loader.js"
   data-site-key="acc_rum_xxxxxxxxxxxxxxxxxxxxxxxx"
 ></script>
 ```
@@ -110,8 +110,8 @@ sampled sessions only — injects the engine bundle during browser idle time.
 | Attribute | Purpose |
 |---|---|
 | `data-site-key` | Required. A **public** key identifying the site. |
-| `data-endpoint` | Config and beacon origin. Defaults to the loader script's own origin. |
-| `data-engine` | Engine bundle URL. Defaults to a sibling `engine.js`. Set this explicitly if your CDN uses hashed filenames. |
+| `data-endpoint` | Config and beacon origin. Defaults to `https://app.accessible.so`; set it only to point at another Accessible environment. |
+| `data-engine` | Engine bundle URL. Served from `https://accessible.so`, the loader loads the engine version the app's config names (`minCollector`), so it always matches what the app accepts. Self-hosted, it defaults to a sibling `engine.js`; set this explicitly if your CDN uses hashed filenames. |
 | `data-sample` | Local override of the sample rate (0–1), for development. |
 | `data-disabled` | Presence disables the loader entirely: no fetch, no storage, no injection. |
 
