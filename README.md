@@ -78,11 +78,11 @@ sampled. Real-user monitoring widens what gets tested — real states, real jour
 
 The collector is also honest about its limits in the other direction. On a
 device too slow to scan inside its performance budget it stops after one long
-task, finishes when the tab is hidden, and until then the page is reported as
+task, finishes in idle windows or when the tab is hidden, and until then the page is reported as
 **unmeasured** (`perf.aborted: true`), never as clean. **Never in the way of a
 visitor's input.** Heavy checks run only while the visitor is idle; a visitor
 who is interacting never waits on more than 50 ms of collector work, beyond the
-one run that measures their device. The contrast and target-size rules are too
+one task that reveals the device is too slow (usually the first run, sometimes a chunk). The contrast and target-size rules are too
 expensive to run while the visitor is interacting, so they run in an idle window
 when they are predicted to fit one, otherwise wait until the tab is hidden, and
 if that never comes they are **named in the beacon** (`perf.skipped`) rather

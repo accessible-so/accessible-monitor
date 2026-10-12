@@ -128,7 +128,7 @@ and [`session/sampling.ts`](../packages/monitor-core/src/session/sampling.ts).
 
 ## 4. The performance budget
 
-The rule the collector holds itself to: **never in the way of a visitor's input.** Heavy checks run only while the visitor is idle; a visitor who is interacting never waits on more than 50 ms of collector work, beyond the one run that measures their device.
+The rule the collector holds itself to: **never in the way of a visitor's input.** Heavy checks run only while the visitor is idle; a visitor who is interacting never waits on more than 50 ms of collector work, beyond the one task that reveals the device is too slow (usually the first run, sometimes a chunk).
 
 - The loader defers injecting the engine to `requestIdleCallback` (3s timeout,
   1.5s `setTimeout` fallback).
