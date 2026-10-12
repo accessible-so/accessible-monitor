@@ -118,6 +118,16 @@ async function finished(serverUrl: string, timeoutMs = 60_000): Promise<RumBeaco
   }
 }
 
+/**
+ * Every task over the active budget is either the one calibration run or a
+ * window task, so the count is bounded by 1 + the page's idle runs.
+ */
+function expectActiveBudget(tasks: { duration: number }[], beacons: RumBeaconBody[]): void {
+  const over = tasks.filter((t) => t.duration > BUDGET_MS);
+  const idleRuns = beacons.at(-1)?.perf?.idleRuns ?? 0;
+  expect(over.length, `tasks over ${BUDGET_MS} ms: ${JSON.stringify(over)} with ${idleRuns} idle runs`).toBeLessThanOrEqual(1 + idleRuns);
+}
+
 /** Long tasks the browser saw between two moments of the page's own clock. */
 async function longTasksBetween(watched: WatchedPage, from: number, to: number) {
   return (await watched.longTasks()).filter((t) => t.startTime >= from && t.startTime < to);
@@ -159,8 +169,10 @@ describe.each(RATES)('scan performance budget at %ix CPU', (r) => {
     // The promise: at most the one task that showed this device too slow,
     // then nothing more while the visitor was looking.
     // At most one task over the active budget that was not a window task, and
-    // no window task over the window budget (with 20% for timer noise).
-    expect(visibleLongTasks.filter((t) => t.duration > 150 * 1.2), `window budget broken: ${JSON.stringify(visibleLongTasks)}`).toHaveLength(0);
+    // no window task over the window budget (with 20% for timer noise). The
+    // one allowed over-180 ms task is the calibration first run, not a window.
+    expect(visibleLongTasks.filter((t) => t.duration > 150 * 1.2).length, `window budget broken: ${JSON.stringify(visibleLongTasks)}`).toBeLessThanOrEqual(1);
+    expectActiveBudget(visibleLongTasks, beacons);
 
     const perf = beacons.at(-1)?.perf;
     expect(perf, 'no perf on the last beacon').toBeTruthy();
@@ -182,7 +194,9 @@ describe.each(RATES)('scan performance budget at %ix CPU', (r) => {
 
   it('an ordinary page keeps its contrast findings, checked once the tab hides', async () => {
     const { beacons, visibleLongTasks } = await visit('/');
-    expect(visibleLongTasks.filter((t) => t.duration > 150 * 1.2), `window budget broken: ${JSON.stringify(visibleLongTasks)}`).toHaveLength(0);
+    // The one allowed over-180 ms task is the calibration first run, not a window.
+    expect(visibleLongTasks.filter((t) => t.duration > 150 * 1.2).length, `window budget broken: ${JSON.stringify(visibleLongTasks)}`).toBeLessThanOrEqual(1);
+    expectActiveBudget(visibleLongTasks, beacons);
     expect(ruleSet(beacons), 'the #999-on-#fff text was missed').toContain('wcag:1.4.3');
     const perf = beacons.at(-1)?.perf;
     expect(perf?.aborted).toBe(false);
@@ -197,7 +211,10 @@ describe.each(RATES)('scan performance budget at %ix CPU', (r) => {
   async function expectCheckedByHide(path: string): Promise<void> {
     const watched = await session.open(path);
     await waitForCollector(watched.page);
+    const startedAt = await watched.page.evaluate(() => performance.now());
     const whileVisible = await waitForBeacon(server.url, 1);
+    const hiddenAt = await watched.page.evaluate(() => performance.now());
+    const visibleTasks = await longTasksBetween(watched, startedAt, hiddenAt);
     const tier = whileVisible.find((b) => b.perf?.tier)?.perf?.tier;
     expect(tier, 'no tier on any beacon').toBeDefined();
     if (tier === 'fast') {
@@ -205,7 +222,7 @@ describe.each(RATES)('scan performance budget at %ix CPU', (r) => {
     } else {
       const pending = whileVisible.at(-1)!.perf!.pending ?? [];
       const checked = ruleSet(whileVisible).has('wcag:1.4.3');
-      expect(checked || pending.length > 0, 'contrast neither checked nor reported pending').toBe(true);
+      expect(checked || pending.includes('color-contrast'), 'contrast neither checked nor reported pending').toBe(true);
     }
     await settle(watched, server.url, { scanMs: 500 });
     const beacons = await finished(server.url);
@@ -215,6 +232,7 @@ describe.each(RATES)('scan performance budget at %ix CPU', (r) => {
     expect(beacons.at(-1)?.perf?.pending).toBeUndefined();
     expect(beacons.at(-1)?.perf?.aborted).toBe(false);
     expect(ruleSet(beacons), 'an AAA contrast finding leaked in').not.toContain('wcag:1.4.6');
+    expectActiveBudget(visibleTasks, beacons);
     expectAcceptedByIngest(beacons);
   }
 
@@ -236,7 +254,12 @@ describe.each(RATES)('scan performance budget at %ix CPU', (r) => {
     await watched.page.waitForTimeout(readMs);
     const to = await watched.page.evaluate(() => performance.now());
     const longTasks = await longTasksBetween(watched, from, to);
-    await Promise.all([watched.page.waitForURL(/products\.html/), watched.page.click('a[href^="/products.html"]')]);
+    // Click a link that really changes the URL: on /products.html the plain
+    // /products.html link is a self-link, the utm one is not.
+    const before = watched.page.url();
+    const utm = watched.page.locator('a[href*="utm_source"]');
+    const link = (await utm.count()) > 0 ? utm.first() : watched.page.locator('a[href^="/products.html"]').first();
+    await Promise.all([watched.page.waitForURL((u) => u.href !== before), link.click()]);
     await watched.page.waitForTimeout(1500); // the pagehide beacon lands; the next page has not flushed yet
     return { beacons: await recordedBeacons(server.url), longTasks, debugLines };
   }
@@ -252,14 +275,22 @@ describe.each(RATES)('scan performance budget at %ix CPU', (r) => {
 
       expect(tier).toBeDefined();
       // Honesty, every tier: a document-cost rule with no result is named as unchecked.
-      if (!ruleSet(beacons).has('wcag:1.4.3') && path !== HUGE) {
+      if (!ruleSet(beacons).has('wcag:1.4.3')) {
         expect(unchecked, 'contrast went missing without being reported').toContain('color-contrast');
+      }
+      if (path === HUGE) {
+        // Honesty per part (same rule as the 5,000-element test).
+        const grid = ['color-contrast', 'link-in-text-block', 'target-size'];
+        for (const rule of last?.skipped ?? []) expect(DOCUMENT_COST_RULES).toContain(rule);
+        expect(new Set(grid.map((r) => (last?.skipped ?? []).includes(r))).size, `grid rules skipped inconsistently: ${JSON.stringify(last?.skipped)}`).toBe(1);
       }
       // The point of this change: a fast page is fully checked before the click.
       if (tier === 'fast') {
         expect(unchecked, `${path} was fast but left rules unchecked at the click`).toEqual([]);
       }
-      expect(longTasks.filter((t) => t.duration > 150 * 1.2), 'window budget broken while reading').toHaveLength(0);
+      // The one allowed over-180 ms task is the calibration first run, not a window.
+      expect(longTasks.filter((t) => t.duration > 150 * 1.2).length, `window budget broken while reading: ${JSON.stringify(longTasks)}`).toBeLessThanOrEqual(1);
+      expectActiveBudget(longTasks, beacons);
       expectAcceptedByIngest(beacons);
     });
   }
@@ -267,14 +298,21 @@ describe.each(RATES)('scan performance budget at %ix CPU', (r) => {
   it('a visitor who keeps interacting gets no window: at most the one calibration long task', async () => {
     const watched = await session.open(MID);
     await waitForCollector(watched.page);
+    // The first wheel goes before `from` is read, so no idle window can have
+    // opened before the measured interval starts.
+    await watched.page.mouse.wheel(0, 40);
     const from = await watched.page.evaluate(() => performance.now());
     for (let i = 0; i < 20; i++) {
-      await watched.page.mouse.wheel(0, 40);
       await watched.page.waitForTimeout(300);
+      await watched.page.mouse.wheel(0, 40);
     }
     const to = await watched.page.evaluate(() => performance.now());
     const tasks = await longTasksBetween(watched, from, to);
     expect(tasks.length, `long tasks while interacting: ${JSON.stringify(tasks)}`).toBeLessThanOrEqual(1);
+    // The gate is why: hide the page and see that no window ever ran.
+    await settle(watched, server.url, { scanMs: 0 });
+    const beacons = await finished(server.url);
+    expect(beacons.filter((b) => (b.perf?.idleRuns ?? 0) > 0), 'a window ran while the visitor was interacting').toEqual([]);
   });
 
   it('the floor cost of an axe run scales with the document, not the chunk', async () => {

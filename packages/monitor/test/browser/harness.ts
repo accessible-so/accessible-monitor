@@ -25,7 +25,7 @@ export interface RumBeaconBody {
   routes?: { p: string; r: string | null }[];
   findings?: RumFindingBody[];
   interactions?: { sig: string; r: string | null }[];
-  perf?: { scans: number; longTasks: number; maxTaskMs: number; aborted: boolean; skipped?: string[]; pending?: string[] };
+  perf?: { scans: number; longTasks: number; maxTaskMs: number; aborted: boolean; skipped?: string[]; pending?: string[]; tier?: 'fast' | 'medium' | 'slow'; idleRuns?: number };
 }
 
 export interface RedactedEl {
