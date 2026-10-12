@@ -462,3 +462,7 @@ Chromium and asserts, per constraint:
 
 MIT for our code. `@accessible-so/monitor` bundles axe-core (MPL-2.0) unmodified —
 see [`THIRD_PARTY_NOTICES.md`](./packages/monitor/THIRD_PARTY_NOTICES.md).
+
+## Trademarks
+
+"Accessible" and the Accessible logo are trademarks of L5 Ventures. The license covers the code, not the name: a fork or redistribution may not be called Accessible or presented as ours.

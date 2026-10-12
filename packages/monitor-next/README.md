@@ -203,3 +203,9 @@ for the complete list.
 
 The full framework-adapter contract — what an adapter may supply, and what it
 must never do — is in [docs/adapters.md](../../docs/adapters.md).
+
+## License
+
+MIT.
+
+"Accessible" and the Accessible logo are trademarks of L5 Ventures. The license covers the code, not the name: a fork or redistribution may not be called Accessible or presented as ours.

@@ -35,3 +35,9 @@ import { SIGNATURE_SOURCE } from '@accessible-so/monitor-core/signature/source';
 await page.addInitScript(SIGNATURE_SOURCE);
 // The page can now call `AccessibleSignature.computeSignature(el, ruleKey)`.
 ```
+
+## License
+
+MIT.
+
+"Accessible" and the Accessible logo are trademarks of L5 Ventures. The license covers the code, not the name: a fork or redistribution may not be called Accessible or presented as ours.
