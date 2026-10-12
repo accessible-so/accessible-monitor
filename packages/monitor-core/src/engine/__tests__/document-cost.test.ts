@@ -148,7 +148,7 @@ describe('the document-cost rule set', () => {
 describe('Engine document-cost scheduling', () => {
   function build(
     axe: AxeLike,
-    o: { contrastDeferMaxElements?: number; chunkMax?: number; gate?: IdleGateApi; now?: () => number; firstRunInWindow?: boolean } = {},
+    o: { contrastDeferMaxElements?: number; chunkMax?: number; gate?: IdleGateApi; now?: () => number; firstRunInWindow?: boolean; learned?: Record<string, number>; onLearned?: (l: Record<string, number>) => void } = {},
   ) {
     const scheduler = Scheduler({ win: idleWindow(), chunkMax: o.chunkMax, gate: o.gate });
     const engine = Engine({
@@ -160,6 +160,8 @@ describe('Engine document-cost scheduling', () => {
       contrastDeferMaxElements: o.contrastDeferMaxElements ?? 3000,
       now: o.now,
       firstRunInWindow: o.firstRunInWindow,
+      learned: o.learned,
+      onLearned: o.onLearned as never,
     });
     return { scheduler, engine };
   }
@@ -457,6 +459,97 @@ describe('Engine document-cost scheduling', () => {
     await micro();
     expect(engine.predictedPartMs('region')).toBeCloseTo(60, 5);
     expect(engine.predictedPartMs('grid')).toBe(gridBefore);
+  });
+
+  it('a failed first run leaves the page uncalibrated: no tier, parts never run in a window, still run at drain', async () => {
+    document.body.innerHTML = '<main><p>small</p></main>';
+    const base = fakeAxe();
+    const axe = {
+      calls: base.calls,
+      run(context: Element | Document, options: Parameters<AxeLike['run']>[1]) {
+        const runOnly = (options as Call['options'] | undefined)?.runOnly;
+        if (runOnly?.values === PAGE_LEVEL_RULES) return Promise.reject(new Error('boom'));
+        return base.run(context, options);
+      },
+    };
+    const gate = manualGate();
+    const tiers: string[] = [];
+    const scheduler = Scheduler({ win: idleWindow(), gate });
+    const engine = Engine({ doc: document, win: idleWindow(), axe, scheduler, onViolation: () => {}, onTier: (t) => tiers.push(t) });
+    engine.scanFull();
+    await micro();
+    expect(scheduler.perf().tier).toBeUndefined();
+    expect(tiers).toEqual([]);
+    gate.open();
+    await micro();
+    expect(documentCostRuns(base), 'a part ran in a window on an uncalibrated page').toHaveLength(0);
+    await scheduler.drain();
+    expect(documentCostRuns(base)).toHaveLength(2);
+  });
+
+  it('a first run measured at 0 ms gives no chunk prediction, and a failed chunk run does not change it', async () => {
+    document.body.innerHTML = '<main><p>small</p></main>';
+    const zero = build(fakeAxe(), { now: () => 0 });
+    zero.engine.scanFull();
+    await micro();
+    expect(zero.engine.predictedChunkMs()).toBeNull();
+
+    const clock = { t: 0 };
+    let failChunks = false;
+    const base = fakeAxe();
+    const axe = {
+      calls: base.calls,
+      run(context: Element | Document, options: Parameters<AxeLike['run']>[1]) {
+        const runOnly = (options as Call['options'] | undefined)?.runOnly;
+        if (runOnly?.type === 'rule') { clock.t += 10; return base.run(context, options); }
+        clock.t += failChunks ? 50 : 5;
+        return failChunks ? Promise.reject(new Error('boom')) : base.run(context, options);
+      },
+    };
+    const { engine } = build(axe, { now: () => clock.t });
+    engine.scanFull();
+    await micro();
+    expect(engine.predictedChunkMs()).toBe(5);
+    failChunks = true;
+    engine.scanRoots([document.querySelector('main')!]);
+    await micro();
+    expect(engine.predictedChunkMs()).toBe(5);
+  });
+
+  it('starts from learned multipliers, ignoring invalid ones, and reports a raised one', async () => {
+    document.body.innerHTML = '<main><p>small</p></main>';
+    const cost = { page: 10, grid: 20, region: 60, chunk: 5 };
+    const plain = costedAxe(cost);
+    const base = build(plain.axe, { gate: manualGate(), now: plain.now });
+    base.engine.scanFull();
+    await micro();
+    const regionBase = base.engine.predictedPartMs('region')!;
+
+    const doubled = costedAxe(cost);
+    const d = build(doubled.axe, { gate: manualGate(), now: doubled.now, learned: { region: 2 } });
+    d.engine.scanFull();
+    await micro();
+    expect(d.engine.predictedPartMs('region')).toBeCloseTo(regionBase * 2, 5);
+
+    for (const bad of [0.5, NaN, Infinity, -1]) {
+      const c = costedAxe(cost);
+      const b = build(c.axe, { gate: manualGate(), now: c.now, learned: { region: bad } });
+      b.engine.scanFull();
+      await micro();
+      expect(b.engine.predictedPartMs('region'), `${bad} was not ignored`).toBeCloseTo(regionBase, 5);
+    }
+
+    const c = costedAxe(cost);
+    const seen: Record<string, number>[] = [];
+    const gate = manualGate();
+    const o = build(c.axe, { gate, now: c.now, onLearned: (l) => seen.push(l) });
+    o.engine.scanFull();
+    await micro();
+    gate.open();
+    await micro();
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen.at(-1)!.region).toBeCloseTo(60 / (regionBase / 1), 0);
+    expect(seen.at(-1)!.region).toBeGreaterThan(1);
   });
 
   it('recomputes the tier when a route change re-arms on a bigger page', async () => {

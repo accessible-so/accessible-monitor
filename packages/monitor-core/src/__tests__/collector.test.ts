@@ -29,15 +29,15 @@ const CONFIG: RumConfig = {
 };
 
 interface FakeAxe extends AxeLike {
-  calls: { context: Element | Document }[];
+  calls: { context: Element | Document; options?: { runOnly?: { values?: string[] } } }[];
 }
 
 function fakeAxe(): FakeAxe {
-  const calls: { context: Element | Document }[] = [];
+  const calls: FakeAxe['calls'] = [];
   return {
     calls,
-    run(context: Element | Document, _options?: unknown): Promise<{ violations: AxeViolationLike[] }> {
-      calls.push({ context });
+    run(context: Element | Document, options?: unknown): Promise<{ violations: AxeViolationLike[] }> {
+      calls.push({ context, options: options as FakeAxe['calls'][number]['options'] });
       if (context === document || context === (document as unknown as Element)) {
         const title: AxeViolationLike = {
           id: 'document-title',
@@ -802,6 +802,33 @@ describe('idle windows', () => {
     await settle();
     const docRuns = axe.calls.filter((c) => c.context === document).length;
     expect(docRuns, 'page-level + grid + region while visible').toBe(3);
+  });
+
+  it('keeps what the model learned for the session, so the next page does not repeat the misprediction', async () => {
+    const regionRuns = (axe: ReturnType<typeof fakeAxe>): number =>
+      axe.calls.filter((c) => c.options?.runOnly?.values?.includes('region')).length;
+    const first = fakeAxe();
+    let clock = 0;
+    startWith(first, { idleQuietMs: 20, now: () => (clock += 5) });
+    await settle();
+    await wait(60);
+    await settle();
+    expect(regionRuns(first), 'the first page runs region in its window').toBe(1);
+    const learned = JSON.parse(sessionStorage.getItem('a11y_rum_learned')!) as Record<string, number>;
+    expect(learned.region, 'region overran its model').toBeGreaterThan(1);
+
+    for (const h of handles.splice(0)) h.stop();
+    delete (window as unknown as Record<string, unknown>).__accessibleRumStarted;
+    // A larger multiplier from another page is kept (max wins), and starts the next page's model.
+    sessionStorage.setItem('a11y_rum_learned', JSON.stringify({ ...learned, region: 1000 }));
+    const second = fakeAxe();
+    let clock2 = 0;
+    startWith(second, { idleQuietMs: 20, now: () => (clock2 += 5) });
+    await settle();
+    await wait(60);
+    await settle();
+    expect(regionRuns(second), 'region was predicted over the window and waits for tab-hide').toBe(0);
+    expect(JSON.parse(sessionStorage.getItem('a11y_rum_learned')!).region).toBe(1000);
   });
 
   it('a visitor who keeps interacting gets no window', async () => {

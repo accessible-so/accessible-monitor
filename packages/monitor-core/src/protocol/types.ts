@@ -41,6 +41,7 @@ export interface RumBeacon {
     pending?: string[];                 // rules whose deferred pass has not run yet
     tier?: PageTier;                    // this page view's tier
     idleRuns?: number;                  // tasks run in idle windows
+    windowOverruns?: number;            // window tasks that ran over the idle budget
   };
 }
 export interface RumConfig {

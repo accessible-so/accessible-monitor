@@ -22,6 +22,7 @@ import { DirtyTracker } from './engine/dirty';
 import { Scheduler } from './engine/scheduler';
 import { IdleGate } from './engine/idle-gate';
 import { slower } from './engine/tier';
+import type { DocCostPartName } from './engine/tier';
 import { Engine, countElements } from './engine/index';
 import type { AxeLike, AxeNodeLike, AxeViolationLike } from './engine/axe-runner';
 import { resolveNodeElement } from './engine/axe-runner';
@@ -55,6 +56,7 @@ const ROUTES_KEY = 'a11y_rum_routes';
 const SESSION_SENT_KEY = 'a11y_rum_session_sent';
 
 const TIER_KEY = 'a11y_rum_tier';
+const LEARNED_KEY = 'a11y_rum_learned';
 
 export interface StartOptions {
   siteKey: string;
@@ -184,6 +186,19 @@ function wire(opts: StartOptions, win: Window & Flagged, doc: Document, life: Li
     now: opts.now,
     debug,
     firstRunInWindow: store.get<PageTier>(TIER_KEY) === 'slow' && gate !== undefined,
+    learned: store.get<Partial<Record<DocCostPartName, number>>>(LEARNED_KEY) ?? undefined,
+    onLearned: (learned) => {
+      try {
+        // The largest multiplier any page of the session has needed: a larger one only defers work to tab-hide.
+        const stored = store.get<Partial<Record<DocCostPartName, number>>>(LEARNED_KEY) ?? {};
+        const merged: Record<string, number> = {};
+        for (const part of Object.keys(learned) as DocCostPartName[]) {
+          const old = stored[part];
+          merged[part] = typeof old === 'number' && Number.isFinite(old) ? Math.max(old, learned[part]) : learned[part];
+        }
+        store.set(LEARNED_KEY, merged);
+      } catch (err) { debug('learned store failed', err); }
+    },
     onTier: (tier: PageTier) => {
       try {
         const kept = slower(store.get<PageTier>(TIER_KEY), tier);

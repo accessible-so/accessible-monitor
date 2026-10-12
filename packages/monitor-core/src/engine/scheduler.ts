@@ -56,6 +56,8 @@ export interface SchedulerPerf {
   pending?: string[];
   tier?: PageTier;
   idleRuns?: number;
+  /** Tasks started in an idle window that ran over `idleBudgetMs`: the prediction under-estimated. Absent when none. */
+  windowOverruns?: number;
 }
 
 export type SchedulerJob = () => Promise<number>;
@@ -165,6 +167,7 @@ export function Scheduler(options: SchedulerOptions): SchedulerApi {
   let drainTail: Promise<void> = Promise.resolve();
   let waitingForWindow = false;
   let idleRuns = 0;
+  let windowOverruns = 0;
   let tier: PageTier | undefined;
   let current: Promise<void> | null = null;
   let scans = 0;
@@ -186,6 +189,7 @@ export function Scheduler(options: SchedulerOptions): SchedulerApi {
     if (pending.size > 0) stats.pending = Array.from(pending);
     if (tier) stats.tier = tier;
     if (idleRuns > 0) stats.idleRuns = idleRuns;
+    if (windowOverruns > 0) stats.windowOverruns = windowOverruns;
     return stats;
   }
 
@@ -316,6 +320,7 @@ export function Scheduler(options: SchedulerOptions): SchedulerApi {
       if (choice.inWindow) idleRuns++;
       current = runJob(next!.job).then((ms) => {
         current = null;
+        if (choice.inWindow && typeof ms === 'number' && ms > idleBudgetMs) windowOverruns++;
         finish(ms, next!.exempt || choice.inWindow);
       });
     });

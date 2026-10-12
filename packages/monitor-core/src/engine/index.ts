@@ -34,6 +34,10 @@ export interface EngineOptions {
   /** Run the page's first `axe.run` only in an idle window (the session already knows this device is slow). */
   firstRunInWindow?: boolean;
   onTier?: (tier: PageTier) => void;
+  /** Initial per-part multipliers on the cost model (e.g. from earlier pages of the session). Anything not finite or below 1 is ignored. */
+  learned?: Partial<Record<DocCostPartName, number>>;
+  /** Called with a copy of the multipliers whenever one rises. */
+  onLearned?: (learned: Record<DocCostPartName, number>) => void;
 }
 
 export interface EngineApi {
@@ -46,6 +50,8 @@ export interface EngineApi {
   abandonDeferredDocumentCost(): boolean;
   /** Predicted cost of a document-cost part, from the first run and what parts have actually cost. */
   predictedPartMs(part: DocCostPartName): number | null;
+  /** Predicted cost of the next chunk run; null while no run has been measured above 0 ms. */
+  predictedChunkMs(): number | null;
   scanRoots(roots: Element[]): void;
   stop(): void;
 }
@@ -66,8 +72,12 @@ export function Engine(opts: EngineOptions): EngineApi {
   let fullDone = false;
   let firstRunMs: number | null = null;
   let lastChunkMs: number | null = null;
-  /** Per-page multiplier on the model, raised to what a part actually cost. */
+  /** Multiplier on the model, raised to what a part actually cost; seeded from the session. */
   const learned: Record<DocCostPartName, number> = { grid: 1, region: 1 };
+  for (const name of Object.keys(learned) as DocCostPartName[]) {
+    const v = opts.learned?.[name];
+    if (typeof v === 'number' && Number.isFinite(v) && v >= 1) learned[name] = v;
+  }
   /** Body element count when the current view's parts were armed. */
   let armedElements = 0;
   /** Parts armed for the current view and not yet run, abandoned, or dropped. */
@@ -77,7 +87,10 @@ export function Engine(opts: EngineOptions): EngineApi {
   /** Bumped on every re-arm, so a job queued for an earlier view does nothing. */
   let docGen = 0;
 
-  const chunkPredict = (): number | null => lastChunkMs ?? firstRunMs;
+  const chunkPredict = (): number | null => {
+    const ms = lastChunkMs ?? firstRunMs;
+    return ms !== null && ms > 0 ? ms : null;
+  };
   // An unmeasured page (no first run yet, or a timer too coarse to read) cannot promise a part fits a window.
   const partPredict = (part: DocCostPartName): number | null =>
     firstRunMs === null || firstRunMs <= 0 ? Infinity : predictPartMs(firstRunMs, armedElements, PART_COST[part], learned[part]);
@@ -112,8 +125,8 @@ export function Engine(opts: EngineOptions): EngineApi {
   function scanChunk(chunk: Chunk, elements = 0, idleOnly = false): void {
     scheduler.schedule(async () => {
       if (stopped) return 0;
-      const { violations, ms } = await runChunk(axe, chunk, opts.now);
-      lastChunkMs = ms;
+      const { violations, ms, ok } = await runChunk(axe, chunk, opts.now);
+      if (ok) lastChunkMs = ms;
       if (!stopped) report(violations);
       return ms;
     }, elements, { predictMs: chunkPredict, idleOnly });
@@ -127,8 +140,8 @@ export function Engine(opts: EngineOptions): EngineApi {
       for (let i = 1; i < chunks.length; i++) scanChunk(chunks[i]!, 0, idleOnly);
       const first = chunks[0];
       if (!first) return 0;
-      const { violations, ms } = await runChunk(axe, first, opts.now);
-      lastChunkMs = ms;
+      const { violations, ms, ok } = await runChunk(axe, first, opts.now);
+      if (ok) lastChunkMs = ms;
       if (!stopped) report(violations);
       return ms;
     }, countElements(root) + 1, { predictMs: chunkPredict, idleOnly });
@@ -197,7 +210,10 @@ export function Engine(opts: EngineOptions): EngineApi {
         scheduler.unskip(part.rules);
         const predictedMs = partPredict(part.name);
         const modelMs = firstRunMs !== null && firstRunMs > 0 ? modelPartMs(firstRunMs, armedElements, PART_COST[part.name]) : 0;
-        if (modelMs > 0) learned[part.name] = Math.max(learned[part.name], ms / modelMs);
+        if (modelMs > 0 && ms / modelMs > learned[part.name]) {
+          learned[part.name] = ms / modelMs;
+          try { opts.onLearned?.({ ...learned }); } catch { /* a callback never breaks a scan */ }
+        }
         debug('document-cost part', part.name, ms, predictedMs);
         if (!stopped) report(violations);
         return ms;
@@ -227,6 +243,7 @@ export function Engine(opts: EngineOptions): EngineApi {
       return true;
     },
     predictedPartMs: partPredict,
+    predictedChunkMs: chunkPredict,
 
     scanFull(): void {
       if (stopped || fullDone) return;
@@ -236,8 +253,11 @@ export function Engine(opts: EngineOptions): EngineApi {
       // element-rule scanning of the same page.
       scheduler.schedule(async () => {
         if (stopped) return 0;
-        const { violations, ms } = await runPage(axe, doc, opts.now);
-        if (firstRunMs === null) {
+        const { violations, ms, ok } = await runPage(axe, doc, opts.now);
+        if (!ok) {
+          // A failed run's time says nothing about the page: leave it uncalibrated.
+          debug('calibration failed');
+        } else if (firstRunMs === null) {
           firstRunMs = ms;
           const tier = pageTier(ms, armedElements);
           scheduler.setTier(tier);

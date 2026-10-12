@@ -48,6 +48,9 @@ describe('RumBeaconSchema', () => {
     expect(RumBeaconSchema.safeParse({ ...beacon, perf: { ...perf, tier: 'turbo' } }).success).toBe(false);
     expect(RumBeaconSchema.safeParse({ ...beacon, perf: { ...perf, idleRuns: -1 } }).success).toBe(false);
     expect(RumBeaconSchema.safeParse({ ...beacon, perf: { ...perf, idleRuns: 1.5 } }).success).toBe(false);
+    expect(RumBeaconSchema.safeParse({ ...beacon, perf: { ...perf, windowOverruns: 2 } }).success).toBe(true);
+    expect(RumBeaconSchema.safeParse({ ...beacon, perf: { ...perf, windowOverruns: -1 } }).success).toBe(false);
+    expect(RumBeaconSchema.safeParse({ ...beacon, perf: { ...perf, windowOverruns: 1.5 } }).success).toBe(false);
   });
 
   it('rejects raw text or unknown attribute shapes inside elements', () => {

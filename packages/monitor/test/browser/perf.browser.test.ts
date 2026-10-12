@@ -140,7 +140,7 @@ function collectDebug(watched: WatchedPage): string[] {
  * still visible: every document-cost part fits 150 ms (+20% timer noise), and
  * a task over that is allowed only if the calibration run itself was.
  */
-function expectWindowBudget(path: string, lines: string[], tasks: { duration: number }[]): void {
+function expectWindowBudget(path: string, lines: string[], tasks: { duration: number }[], beacons: RumBeaconBody[]): void {
   const limit = 150 * 1.2;
   for (const l of lines) {
     const m = /document-cost part (\S+) ([\d.]+)/.exec(l);
@@ -148,6 +148,8 @@ function expectWindowBudget(path: string, lines: string[], tasks: { duration: nu
   }
   const first = Number(/calibrated \{firstRunMs: ([\d.]+)/.exec(lines.join('\n'))?.[1] ?? 0);
   const over = tasks.filter((t) => t.duration > limit);
+  // The scheduler's own count of window tasks over 150 ms: the model under-predicted. If this fails where the per-part rule above passes, a part landed between 150 and 180 ms and the coefficients need raising.
+  expect(beacons.filter((b) => (b.perf?.windowOverruns ?? 0) > 0), `${path}: a window task ran over the window budget`).toEqual([]);
   expect(over.length, `${path}: tasks over ${limit} ms: ${JSON.stringify(over)} (calibration run ${first} ms)`).toBeLessThanOrEqual(first > limit ? 1 : 0);
 }
 
@@ -193,7 +195,7 @@ describe.each(RATES)('scan performance budget at %ix CPU', (r) => {
 
     // The promise: every window part fits the window budget; a task over it
     // is allowed only if the calibration run itself was that long.
-    expectWindowBudget(HUGE, visibleDebug, visibleLongTasks);
+    expectWindowBudget(HUGE, visibleDebug, visibleLongTasks, beacons);
     expectActiveBudget(visibleLongTasks, beacons);
 
     const perf = beacons.at(-1)?.perf;
@@ -216,7 +218,7 @@ describe.each(RATES)('scan performance budget at %ix CPU', (r) => {
 
   it('an ordinary page keeps its contrast findings, checked once the tab hides', async () => {
     const { beacons, visibleLongTasks, visibleDebug } = await visit('/');
-    expectWindowBudget('/', visibleDebug, visibleLongTasks);
+    expectWindowBudget('/', visibleDebug, visibleLongTasks, beacons);
     expectActiveBudget(visibleLongTasks, beacons);
     expect(ruleSet(beacons), 'the #999-on-#fff text was missed').toContain('wcag:1.4.3');
     const perf = beacons.at(-1)?.perf;
@@ -256,7 +258,7 @@ describe.each(RATES)('scan performance budget at %ix CPU', (r) => {
     expect(beacons.at(-1)?.perf?.aborted).toBe(false);
     expect(ruleSet(beacons), 'an AAA contrast finding leaked in').not.toContain('wcag:1.4.6');
     expectActiveBudget(visibleTasks, beacons);
-    expectWindowBudget(path, visibleDebug, visibleTasks);
+    expectWindowBudget(path, visibleDebug, visibleTasks, beacons);
     expectAcceptedByIngest(beacons);
   }
 
@@ -312,7 +314,7 @@ describe.each(RATES)('scan performance budget at %ix CPU', (r) => {
       if (tier === 'fast') {
         expect(unchecked, `${path} was fast but left rules unchecked at the click`).toEqual([]);
       }
-      expectWindowBudget(path, visibleDebug, longTasks);
+      expectWindowBudget(path, visibleDebug, longTasks, beacons);
       expectActiveBudget(longTasks, beacons);
       expectAcceptedByIngest(beacons);
     });

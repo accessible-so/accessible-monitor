@@ -170,6 +170,8 @@ export const RumBeaconSchema = z.object({
     tier: z.enum(['fast', 'medium', 'slow']).optional(),
     // Tasks run in idle windows while the page was visible. Absent when none.
     idleRuns: z.number().int().min(0).optional(),
+    // Window tasks that ran over the idle budget: the cost model under-predicted. Absent when none.
+    windowOverruns: z.number().int().min(0).optional(),
   }).strict().optional(),
 }).strict();
 

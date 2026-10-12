@@ -265,6 +265,24 @@ describe('Scheduler idle windows', () => {
     expect(scheduler.perf().aborted).toBe(false);
   });
 
+  it('counts window tasks that ran over the idle budget as windowOverruns, and nothing else', async () => {
+    const gate = manualGate();
+    const scheduler = Scheduler({ win: idleWindow(), gate });
+    scheduler.schedule(() => Promise.resolve(120), 0, { idleOnly: true, predictMs: () => 100 });
+    gate.open();
+    await micro();
+    expect(scheduler.perf().idleRuns).toBe(1);
+    expect('windowOverruns' in scheduler.perf(), 'absent while none overran').toBe(false);
+    scheduler.schedule(() => Promise.resolve(200), 0, { idleOnly: true, predictMs: () => 100 });
+    await micro();
+    expect(scheduler.perf().windowOverruns).toBe(1);
+    // A drain job over the budget was not started in a window.
+    gate.close();
+    scheduler.schedule(() => Promise.resolve(400), 0, { idleOnly: true });
+    await scheduler.drain();
+    expect(scheduler.perf().windowOverruns).toBe(1);
+  });
+
   it('never starts a task in a window when it is predicted over the idle budget', async () => {
     const gate = manualGate();
     const scheduler = Scheduler({ win: idleWindow(), gate });
