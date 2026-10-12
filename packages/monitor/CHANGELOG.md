@@ -1,6 +1,12 @@
 # @accessible-so/monitor
 
+## 0.5.0
+
+- Built against @accessible-so/monitor-core 0.5.0 (idle-window collection; see its changelog).
+
 ## 0.4.0
+
+Never published; 0.5.0 is the first public release.
 
 - Rebuilt on core 0.4.0: the engine bundle now costs the visitor at most one scan task over 50ms while they are looking, on any device — it parks after that one and finishes when the tab hides — and runs the contrast/target-size pass at tab-hide on every page. Beacons are unchanged in shape; `perf.aborted` is true while scanning is parked and is cleared on a later beacon if the rest finishes. The loader is unchanged.
 

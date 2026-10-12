@@ -1,6 +1,17 @@
 # @accessible-so/monitor-core
 
+## 0.5.0
+
+- **Heavy checks run while the visitor is idle, not only when the tab hides.** After a second with no pointer, key, wheel, touch or scroll input, on a visible and loaded page, a task may run up to 150 ms if its predicted cost fits. Any input closes the window. Before, the contrast pass and any parked scanning waited for tab-hide, which on an ordinary link click never came: `pagehide` follows `visibilitychange` immediately and the work was abandoned.
+- **Predictions from the page's own first run, scaled by page size.** A part's cost is predicted as `firstRunMs × (base + perThousand × elements / 1000) × learned`, with the grid pass (`color-contrast`, `link-in-text-block`, `target-size`) at 3 / 15 and `region` at 0.5 / 0.8. It grows with the page because contrast builds a grid over the whole document while the first run barely moves. `learned` is a per-part multiplier that only rises, when a part runs longer than predicted, so the mistake is made once per page. `perf.tier` (`fast`/`medium`/`slow`) names what fits on this page and is recomputed on a client-side route change; `perf.idleRuns` counts window tasks. The session remembers only the slowest tier, so a known-slow device's next page runs its first scan in a window too. `saveData` turns windows off.
+- **The document-cost pass is two runs**: `color-contrast`, `link-in-text-block`, `target-size` (one grid), then `region`. Each leaves `perf.pending` on its own. After a scheduler abort, parts that can no longer run are reported `skipped` at tab-hide rather than left `pending`.
+- **Fixed:** at tab-hide the document-cost pass was started directly while a queued chunk could still be running; axe refuses concurrent runs, so the pass could finish with no results and report the rules as checked. Everything now goes through the scheduler, whose drain is serialised and tracked as in flight: a second drain waits instead of running axe alongside the first, and a `pagehide` mid-drain reports the page unfinished.
+- A client-side route change reports the previous view's unrun parts as `skipped` in a beacon of their own before arming the new view, instead of silently re-arming them.
+- Pages over 3,000 elements still drop the pass at tab-hide, but a window whose prediction fits now runs it.
+
 ## 0.4.0
+
+Never published; 0.5.0 is the first public release.
 
 - **At most one long task while the visitor is looking, on any device.** The scheduler parks on the first scan run over the 50ms budget instead of halving the chunk size and aborting after three: most of a run's cost is a floor set by the document and the device, so on a slow device each halving was another long task. Parked work is finished when the tab hides (`drain()`), and the page reports `perf.aborted: true` until it is. Chunks are 200 elements (was 400, halving to 100).
 - **The document-cost pass (contrast, target size, link-in-text-block, region) always waits for the tab to hide**, on every page up to 3,000 elements; the immediate tier for pages under 250 elements is gone. It was measured on a fast laptop (~22ms on 120 elements) and is ~76ms at a mid-range phone's speed. `contrastMaxElements` is removed.

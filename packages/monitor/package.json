@@ -1,6 +1,6 @@
 {
   "name": "@accessible-so/monitor",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Script-tag loader and axe-backed engine bundle for Accessible RUM collection.",
   "license": "MIT",
   "author": "Accessible <support@accessible.so>",
