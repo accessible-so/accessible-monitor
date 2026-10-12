@@ -128,6 +128,29 @@ function expectActiveBudget(tasks: { duration: number }[], beacons: RumBeaconBod
   expect(over.length, `tasks over ${BUDGET_MS} ms: ${JSON.stringify(over)} with ${idleRuns} idle runs`).toBeLessThanOrEqual(1 + idleRuns);
 }
 
+/** Collects the engine's debug console lines (the harness enables debug). */
+function collectDebug(watched: WatchedPage): string[] {
+  const lines: string[] = [];
+  watched.page.on('console', (m) => { if (m.type() === 'debug') lines.push(m.text()); });
+  return lines;
+}
+
+/**
+ * The window promise, from the engine's own lines logged while the page was
+ * still visible: every document-cost part fits 150 ms (+20% timer noise), and
+ * a task over that is allowed only if the calibration run itself was.
+ */
+function expectWindowBudget(path: string, lines: string[], tasks: { duration: number }[]): void {
+  const limit = 150 * 1.2;
+  for (const l of lines) {
+    const m = /document-cost part (\S+) ([\d.]+)/.exec(l);
+    if (m) expect(Number(m[2]), `${path}: document-cost part ${m[1]} took ${m[2]} ms, over the ${limit} ms window budget`).toBeLessThanOrEqual(limit);
+  }
+  const first = Number(/calibrated \{firstRunMs: ([\d.]+)/.exec(lines.join('\n'))?.[1] ?? 0);
+  const over = tasks.filter((t) => t.duration > limit);
+  expect(over.length, `${path}: tasks over ${limit} ms: ${JSON.stringify(over)} (calibration run ${first} ms)`).toBeLessThanOrEqual(first > limit ? 1 : 0);
+}
+
 /** Long tasks the browser saw between two moments of the page's own clock. */
 async function longTasksBetween(watched: WatchedPage, from: number, to: number) {
   return (await watched.longTasks()).filter((t) => t.startTime >= from && t.startTime < to);
@@ -140,15 +163,17 @@ async function longTasksBetween(watched: WatchedPage, from: number, to: number) 
  */
 async function visit(path: string, scanMs = 3000) {
   const watched = await session.open(path);
+  const debug = collectDebug(watched);
   await waitForCollector(watched.page);
   // After the engine has started, so the bundle's own parse — paid once,
   // before any scanning — is not counted against the collector's work.
   const engineAt = await watched.page.evaluate(() => performance.now());
   await watched.page.waitForTimeout(scanMs);
   const hiddenAt = await watched.page.evaluate(() => performance.now());
+  const visibleDebug = [...debug];
   await settle(watched, server.url, { scanMs: 0 });
   const beacons = await finished(server.url);
-  return { watched, beacons, visibleLongTasks: await longTasksBetween(watched, engineAt, hiddenAt) };
+  return { watched, beacons, visibleLongTasks: await longTasksBetween(watched, engineAt, hiddenAt), visibleDebug };
 }
 
 describe.each(RATES)('scan performance budget at %ix CPU', (r) => {
@@ -164,14 +189,11 @@ describe.each(RATES)('scan performance budget at %ix CPU', (r) => {
   });
 
   it('a 5,000-element page costs the visitor at most one long task, and is still fully scanned', async () => {
-    const { beacons, visibleLongTasks } = await visit(HUGE, 8000);
+    const { beacons, visibleLongTasks, visibleDebug } = await visit(HUGE, 8000);
 
-    // The promise: at most the one task that showed this device too slow,
-    // then nothing more while the visitor was looking.
-    // At most one task over the active budget that was not a window task, and
-    // no window task over the window budget (with 20% for timer noise). The
-    // one allowed over-180 ms task is the calibration first run, not a window.
-    expect(visibleLongTasks.filter((t) => t.duration > 150 * 1.2).length, `window budget broken: ${JSON.stringify(visibleLongTasks)}`).toBeLessThanOrEqual(1);
+    // The promise: every window part fits the window budget; a task over it
+    // is allowed only if the calibration run itself was that long.
+    expectWindowBudget(HUGE, visibleDebug, visibleLongTasks);
     expectActiveBudget(visibleLongTasks, beacons);
 
     const perf = beacons.at(-1)?.perf;
@@ -193,9 +215,8 @@ describe.each(RATES)('scan performance budget at %ix CPU', (r) => {
   });
 
   it('an ordinary page keeps its contrast findings, checked once the tab hides', async () => {
-    const { beacons, visibleLongTasks } = await visit('/');
-    // The one allowed over-180 ms task is the calibration first run, not a window.
-    expect(visibleLongTasks.filter((t) => t.duration > 150 * 1.2).length, `window budget broken: ${JSON.stringify(visibleLongTasks)}`).toBeLessThanOrEqual(1);
+    const { beacons, visibleLongTasks, visibleDebug } = await visit('/');
+    expectWindowBudget('/', visibleDebug, visibleLongTasks);
     expectActiveBudget(visibleLongTasks, beacons);
     expect(ruleSet(beacons), 'the #999-on-#fff text was missed').toContain('wcag:1.4.3');
     const perf = beacons.at(-1)?.perf;
@@ -210,11 +231,13 @@ describe.each(RATES)('scan performance budget at %ix CPU', (r) => {
    */
   async function expectCheckedByHide(path: string): Promise<void> {
     const watched = await session.open(path);
+    const debug = collectDebug(watched);
     await waitForCollector(watched.page);
     const startedAt = await watched.page.evaluate(() => performance.now());
     const whileVisible = await waitForBeacon(server.url, 1);
     const hiddenAt = await watched.page.evaluate(() => performance.now());
     const visibleTasks = await longTasksBetween(watched, startedAt, hiddenAt);
+    const visibleDebug = [...debug];
     const tier = whileVisible.find((b) => b.perf?.tier)?.perf?.tier;
     expect(tier, 'no tier on any beacon').toBeDefined();
     if (tier === 'fast') {
@@ -233,6 +256,7 @@ describe.each(RATES)('scan performance budget at %ix CPU', (r) => {
     expect(beacons.at(-1)?.perf?.aborted).toBe(false);
     expect(ruleSet(beacons), 'an AAA contrast finding leaked in').not.toContain('wcag:1.4.6');
     expectActiveBudget(visibleTasks, beacons);
+    expectWindowBudget(path, visibleDebug, visibleTasks);
     expectAcceptedByIngest(beacons);
   }
 
@@ -247,13 +271,13 @@ describe.each(RATES)('scan performance budget at %ix CPU', (r) => {
   /** Reads `path` for `readMs` without touching it, then clicks a link to another page. */
   async function readThenClick(path: string, readMs = 5000) {
     const watched = await session.open(path);
-    const debugLines: string[] = [];
-    watched.page.on('console', (m) => { if (m.type() === 'debug') debugLines.push(m.text()); });
+    const debugLines = collectDebug(watched);
     await waitForCollector(watched.page);
     const from = await watched.page.evaluate(() => performance.now());
     await watched.page.waitForTimeout(readMs);
     const to = await watched.page.evaluate(() => performance.now());
     const longTasks = await longTasksBetween(watched, from, to);
+    const visibleDebug = [...debugLines];
     // Click a link that really changes the URL: on /products.html the plain
     // /products.html link is a self-link, the utm one is not.
     const before = watched.page.url();
@@ -261,12 +285,12 @@ describe.each(RATES)('scan performance budget at %ix CPU', (r) => {
     const link = (await utm.count()) > 0 ? utm.first() : watched.page.locator('a[href^="/products.html"]').first();
     await Promise.all([watched.page.waitForURL((u) => u.href !== before), link.click()]);
     await watched.page.waitForTimeout(1500); // the pagehide beacon lands; the next page has not flushed yet
-    return { beacons: await recordedBeacons(server.url), longTasks, debugLines };
+    return { beacons: await recordedBeacons(server.url), longTasks, debugLines, visibleDebug };
   }
 
   for (const path of ['/', '/products.html', MID, HUGE]) {
     it(`a visitor who reads ${path} and clicks a link: what got checked`, async () => {
-      const { beacons, longTasks, debugLines } = await readThenClick(path);
+      const { beacons, longTasks, debugLines, visibleDebug } = await readThenClick(path);
       const tier = beacons.find((b) => b.perf?.tier)?.perf?.tier;
       const last = beacons.at(-1)?.perf;
       const unchecked = [...(last?.skipped ?? []), ...(last?.pending ?? [])];
@@ -288,8 +312,7 @@ describe.each(RATES)('scan performance budget at %ix CPU', (r) => {
       if (tier === 'fast') {
         expect(unchecked, `${path} was fast but left rules unchecked at the click`).toEqual([]);
       }
-      // The one allowed over-180 ms task is the calibration first run, not a window.
-      expect(longTasks.filter((t) => t.duration > 150 * 1.2).length, `window budget broken while reading: ${JSON.stringify(longTasks)}`).toBeLessThanOrEqual(1);
+      expectWindowBudget(path, visibleDebug, longTasks);
       expectActiveBudget(longTasks, beacons);
       expectAcceptedByIngest(beacons);
     });
