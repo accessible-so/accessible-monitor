@@ -214,7 +214,7 @@ describe('the Next adapter, end to end', () => {
     server.setCors('wildcard');
     // Not a claim about the fixture's internals: the endpoint really does
     // answer `*` to a request that carries an Origin.
-    const probe = await fetch(`${server.url}/api/rum/config`, { headers: { Origin: app.url } });
+    const probe = await fetch(`${server.url}/api/a11y/config`, { headers: { Origin: app.url } });
     expect(probe.headers.get('access-control-allow-origin')).toBe('*');
 
     const watched = await open('/products/red-shoes');

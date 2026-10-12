@@ -4,7 +4,7 @@
  * Two servers are in play and they are deliberately different origins. The
  * Next app serves the pages; the collector's own fixture server (reused
  * wholesale from `@accessible-so/monitor`'s browser harness) serves
- * `/rum/loader.js`, answers `/api/rum/config`, and records the beacons. That
+ * `/a11y/loader.js`, answers `/api/a11y/config`, and records the beacons. That
  * split is the honest shape of a real install — the site and the collector
  * endpoint are never the same host — and it means everything the collector
  * harness already knows how to do (`settle`, `allFindings`, `setConfig`) works

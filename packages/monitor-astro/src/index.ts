@@ -4,7 +4,7 @@ import type { SerializedRoute } from './client';
 export type { SerializedRoute } from './client';
 
 export const DEFAULT_ENDPOINT = 'https://app.accessible.so';
-export const DEFAULT_LOADER_SRC = 'https://accessible.so/rum/loader.js';
+export const DEFAULT_LOADER_SRC = 'https://accessible.so/a11y/loader.js';
 
 export interface AccessibleMonitorOptions {
   /** The site key from your domain's Install snippet, `acc_rum_…`. */
@@ -13,7 +13,7 @@ export interface AccessibleMonitorOptions {
   endpoint?: string;
   /**
    * The loader's URL, to self-host it (the engine is read from `engine.js` next
-   * to it). Defaults to Accessible's copy, or `<endpoint>/rum/loader.js` when
+   * to it). Defaults to Accessible's copy, or `<endpoint>/a11y/loader.js` when
    * `endpoint` is set.
    */
   src?: string;
@@ -43,7 +43,7 @@ export function loaderSnippet(endpoint: string, siteKey: string, src?: string): 
   const custom = endpoint !== DEFAULT_ENDPOINT;
   return (
     `(function(){var s=document.createElement('script');` +
-    `s.src=${JSON.stringify(src ?? (custom ? `${endpoint}/rum/loader.js` : DEFAULT_LOADER_SRC))};s.async=true;` +
+    `s.src=${JSON.stringify(src ?? (custom ? `${endpoint}/a11y/loader.js` : DEFAULT_LOADER_SRC))};s.async=true;` +
     `s.setAttribute('data-site-key',${JSON.stringify(siteKey)});` +
     (custom ? `s.setAttribute('data-endpoint',${JSON.stringify(endpoint)});` : '') +
     `document.head.appendChild(s)})();`

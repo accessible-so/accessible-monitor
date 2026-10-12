@@ -62,7 +62,7 @@ Both components take the same props:
 |---|---|---|
 | `siteKey` | (required) | Your site's `acc_rum_…` key. |
 | `endpoint` | `https://app.accessible.so` | Where config is read and beacons are sent. Set it only to point at another Accessible environment. |
-| `src` | `https://accessible.so/rum/loader.js` | The loader's URL, to self-host it (the engine is read from `engine.js` next to it). With a custom `endpoint` it defaults to `<endpoint>/rum/loader.js`. |
+| `src` | `https://accessible.so/a11y/loader.js` | The loader's URL, to self-host it (the engine is read from `engine.js` next to it). With a custom `endpoint` it defaults to `<endpoint>/a11y/loader.js`. |
 
 Either component registers the route-pattern adapter on
 `window.__accessibleAdapter` and keeps it current on every navigation, then

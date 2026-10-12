@@ -348,7 +348,7 @@ describe.each(RATES)('scan performance budget at %ix CPU', (r) => {
     // absolute numbers are the device's. The collector is off for this one.
     await setConfig(server.url, { enabled: false });
     const watched = await session.open(HUGE, false);
-    await watched.page.addScriptTag({ url: `${server.url}/rum/engine.js` });
+    await watched.page.addScriptTag({ url: `${server.url}/a11y/engine.js` });
     const timings = await watched.page.evaluate(async () => {
       const axe = (window as unknown as {
         axe: { run(ctx: Element | Document, o: object): Promise<unknown> };

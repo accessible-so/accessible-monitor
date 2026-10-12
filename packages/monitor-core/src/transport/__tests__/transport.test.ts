@@ -220,7 +220,7 @@ describe('Transport', () => {
     t.flush('hidden');
     expect(beaconSpy).toHaveBeenCalledTimes(1);
     const [calledUrl, blob] = beaconSpy.mock.calls[0]!;
-    expect(calledUrl).toBe('https://x.test/api/rum/ingest');
+    expect(calledUrl).toBe('https://x.test/api/a11y/ingest');
     expect(blob).toBeInstanceOf(Blob);
     // `text/plain` keeps the beacon a CORS-safelisted simple request: no
     // preflight, and no dependence on the ingest endpoint echoing `Origin`.
@@ -242,7 +242,7 @@ describe('Transport', () => {
 
     expect(beacon).toHaveBeenCalledTimes(1);
     expect(doFetch).toHaveBeenCalledTimes(1);
-    expect(doFetch.mock.calls[0]![0]).toBe('https://x.test/api/rum/ingest');
+    expect(doFetch.mock.calls[0]![0]).toBe('https://x.test/api/a11y/ingest');
     expect(doFetch.mock.calls[0]![1]).toMatchObject({ keepalive: true, method: 'POST' });
     t.detach();
   });
@@ -256,7 +256,7 @@ describe('Transport', () => {
     t.flush('hidden');
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     const [calledUrl, init] = fetchSpy.mock.calls[0]!;
-    expect(calledUrl).toBe('https://x.test/api/rum/ingest');
+    expect(calledUrl).toBe('https://x.test/api/a11y/ingest');
     expect((init as RequestInit).keepalive).toBe(true);
     t.detach();
   });

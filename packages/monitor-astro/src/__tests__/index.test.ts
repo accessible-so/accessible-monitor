@@ -24,7 +24,7 @@ describe('serializeRoutes', () => {
 describe('loaderSnippet', () => {
   it('adds the loader tag with the key and endpoint as attributes', () => {
     const js = loaderSnippet('https://app.example', 'acc_rum_k');
-    expect(js).toContain('"https://app.example/rum/loader.js"');
+    expect(js).toContain('"https://app.example/a11y/loader.js"');
     expect(js).toContain(`s.setAttribute('data-site-key',"acc_rum_k")`);
     expect(js).toContain(`s.setAttribute('data-endpoint',"https://app.example")`);
   });
@@ -58,7 +58,7 @@ describe('accessibleMonitor', () => {
       updateConfig: () => {},
     });
     expect(injected[0]![0]).toBe('head-inline');
-    expect(injected[0]![1]).toContain('"https://self.example/rum/loader.js"');
+    expect(injected[0]![1]).toContain('"https://self.example/a11y/loader.js"');
     expect(injected[1]).toEqual(['page', 'import "virtual:accessible-monitor/routes";']);
   });
 
@@ -69,7 +69,7 @@ describe('accessibleMonitor', () => {
       return injected[0]!;
     };
     const plain = snippet({ siteKey: 'acc_rum_k' });
-    expect(plain).toContain('"https://accessible.so/rum/loader.js"');
+    expect(plain).toContain('"https://accessible.so/a11y/loader.js"');
     expect(plain).not.toContain('data-endpoint');
     expect(snippet({ siteKey: 'acc_rum_k', src: 'https://cdn.example/l.js' })).toContain('"https://cdn.example/l.js"');
   });

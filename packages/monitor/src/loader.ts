@@ -11,12 +11,12 @@
     const src = new URL(s.src, location.href);
     const endpoint = (s.getAttribute('data-endpoint') || 'https://app.accessible.so').replace(/\/$/, '');
     // Served by Accessible, the engine is the version the app's config names
-    // (`/rum/<version>/engine.js`), so it always matches what ingest accepts.
+    // (`/a11y/<version>/engine.js`), so it always matches what ingest accepts.
     // Self-hosted, it is the file next to the loader.
     const engineFor = (cfg: any) =>
       s.getAttribute('data-engine') ||
       (src.origin === 'https://accessible.so' && /^\d+\.\d+\.\d+$/.test(cfg.minCollector)
-        ? `${src.origin}/rum/${cfg.minCollector}/engine.js`
+        ? `${src.origin}/a11y/${cfg.minCollector}/engine.js`
         : src.href.replace(/loader(\.min)?\.js(\?.*)?$/, 'engine.js'));
     const debug = /[?&]a11y_debug=1(&|$)/.test(location.search);
     const ss = (() => {
@@ -91,7 +91,7 @@
       const ric = w.requestIdleCallback as undefined | ((cb: () => void, o?: object) => void);
       ric ? ric(() => inject(cfg), { timeout: 3000 }) : setTimeout(() => inject(cfg), 1500);
     };
-    fetch(`${endpoint}/api/rum/config?k=${encodeURIComponent(key)}`, { credentials: 'omit' })
+    fetch(`${endpoint}/api/a11y/config?k=${encodeURIComponent(key)}`, { credentials: 'omit' })
       .then((r) => (r.ok ? r.json() : null))
       .then(decide)
       .catch(() => {});

@@ -58,7 +58,7 @@ describe('AccessibleMonitor (App Router)', () => {
     expect(patternForBrowserPath()).toBe('/products/[slug]');
 
     const script = container.querySelector('script');
-    expect(script?.getAttribute('src')).toBe('https://ingest.test/rum/loader.js');
+    expect(script?.getAttribute('src')).toBe('https://ingest.test/a11y/loader.js');
     expect(script?.getAttribute('data-site-key')).toBe('acc_rum_x');
     expect(script?.getAttribute('data-endpoint')).toBe('https://ingest.test');
 
@@ -116,7 +116,7 @@ describe('AccessibleMonitorPages (Pages Router)', () => {
     expect(patternForBrowserPath()).toBe('/products/[slug]');
 
     const script = container.querySelector('script');
-    expect(script?.getAttribute('src')).toBe('https://ingest.test/rum/loader.js');
+    expect(script?.getAttribute('src')).toBe('https://ingest.test/a11y/loader.js');
     expect(script?.getAttribute('data-site-key')).toBe('acc_rum_x');
     expect(script?.getAttribute('data-endpoint')).toBe('https://ingest.test');
 
@@ -152,19 +152,19 @@ describe('AccessibleMonitorPages (Pages Router)', () => {
 
     expect(adapterWindow().__accessibleAdapter).toBeUndefined();
     expect(container.querySelector('script')?.getAttribute('src')).toBe(
-      'https://ingest.test/rum/loader.js',
+      'https://ingest.test/a11y/loader.js',
     );
   });
 });
 
 describe('loaderAttributes', () => {
   it("defaults to Accessible's hosted loader and leaves data-endpoint to the loader's own default", () => {
-    expect(loaderAttributes({ siteKey: 'k' })).toEqual({ src: 'https://accessible.so/rum/loader.js', 'data-site-key': 'k' });
-    expect(loaderAttributes({ siteKey: 'k', endpoint: 'https://app.accessible.so' })).toEqual({ src: 'https://accessible.so/rum/loader.js', 'data-site-key': 'k' });
+    expect(loaderAttributes({ siteKey: 'k' })).toEqual({ src: 'https://accessible.so/a11y/loader.js', 'data-site-key': 'k' });
+    expect(loaderAttributes({ siteKey: 'k', endpoint: 'https://app.accessible.so' })).toEqual({ src: 'https://accessible.so/a11y/loader.js', 'data-site-key': 'k' });
   });
   it('a custom endpoint serves the loader too, unless src says otherwise', () => {
     expect(loaderAttributes({ siteKey: 'k', endpoint: 'https://dev.example' })).toEqual({
-      src: 'https://dev.example/rum/loader.js', 'data-site-key': 'k', 'data-endpoint': 'https://dev.example',
+      src: 'https://dev.example/a11y/loader.js', 'data-site-key': 'k', 'data-endpoint': 'https://dev.example',
     });
     expect(loaderAttributes({ siteKey: 'k', src: 'https://cdn.example/loader.js' })).toEqual({ src: 'https://cdn.example/loader.js', 'data-site-key': 'k' });
   });

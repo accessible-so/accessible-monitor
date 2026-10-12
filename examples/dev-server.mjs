@@ -6,11 +6,11 @@
  * Playwright constraint suite, which needs a free port, a resettable beacon
  * log, and a config it can rewrite between scenarios.
  *
- * It serves the fixture site at `/`, the built collector bundles at `/rum/`,
+ * It serves the fixture site at `/`, the built collector bundles at `/a11y/`,
  * and the two endpoints the collector talks to:
  *
- *   GET  /api/rum/config   the per-site config the loader fetches
- *   POST /api/rum/ingest   beacons (204, CORS open)
+ *   GET  /api/a11y/config   the per-site config the loader fetches
+ *   POST /api/a11y/ingest   beacons (204, CORS open)
  *
  * plus three test hooks, all under a `__` prefix so they can never collide
  * with a fixture path:
@@ -179,12 +179,12 @@ export function createServer(port = 0, options = {}) {
       });
     }
 
-    if (path === '/api/rum/config') {
+    if (path === '/api/a11y/config') {
       counts.config += 1;
       return json(res, 200, { ...config, endpoint: config.endpoint || origin() });
     }
 
-    if (path === '/api/rum/ingest' && method === 'POST') {
+    if (path === '/api/a11y/ingest' && method === 'POST') {
       counts.ingest += 1;
       const raw = await readBody(req);
       // `navigator.sendBeacon` sends a Blob; its type reaches us as the
@@ -229,8 +229,8 @@ export function createServer(port = 0, options = {}) {
       return json(res, 200, { ok: true });
     }
 
-    if (path.startsWith('/rum/')) {
-      const file = path.slice('/rum/'.length);
+    if (path.startsWith('/a11y/')) {
+      const file = path.slice('/a11y/'.length);
       if (file === 'loader.js') counts.loader += 1;
       if (file === 'engine.js') counts.engine += 1;
       return serveFile(res, RUM_DIR, file);
@@ -276,6 +276,6 @@ if (invokedDirectly) {
   console.log(`fixture site   ${started.url}/`);
   console.log(`big page       ${started.url}/big.html`);
   console.log(`debug mode     ${started.url}/?a11y_debug=1`);
-  console.log(`collector      ${started.url}/rum/loader.js`);
+  console.log(`collector      ${started.url}/a11y/loader.js`);
   console.log(`beacons        ${started.url}/__beacons`);
 }

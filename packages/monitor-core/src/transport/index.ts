@@ -97,7 +97,7 @@ function defaultSend(url: string, body: string): boolean {
 }
 
 export function Transport(opts: TransportOptions): TransportApi {
-  const url = `${opts.endpoint}/api/rum/ingest`;
+  const url = `${opts.endpoint}/api/a11y/ingest`;
   const maxFindings = opts.maxFindings ?? 50;
   const maxBytes = opts.maxBytes ?? 60_000;
   const sendFn = opts.send ?? defaultSend;

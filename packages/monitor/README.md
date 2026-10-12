@@ -20,7 +20,7 @@ customer's page.
 ```html
 <script
   async
-  src="https://accessible.so/rum/loader.js"
+  src="https://accessible.so/a11y/loader.js"
   data-site-key="acc_rum_xxxxxxxxxxxxxxxxxxxxxxxx"
 ></script>
 ```

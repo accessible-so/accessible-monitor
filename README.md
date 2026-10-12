@@ -97,7 +97,7 @@ measurements.
 ```html
 <script
   async
-  src="https://accessible.so/rum/loader.js"
+  src="https://accessible.so/a11y/loader.js"
   data-site-key="acc_rum_xxxxxxxxxxxxxxxxxxxxxxxx"
 ></script>
 ```
@@ -322,7 +322,7 @@ router needs nothing extra. See the
 
 ## What is sent
 
-Beacons are `POST`ed to `/api/rum/ingest` with `navigator.sendBeacon`, falling
+Beacons are `POST`ed to `/api/a11y/ingest` with `navigator.sendBeacon`, falling
 back to `fetch(keepalive)`. The `fetch` fallback sets `credentials: 'omit'`, so
 no cookies are attached. `sendBeacon` has no such option — it is fire-and-forget
 and takes only a URL and a body — so a beacon it sends carries whatever the

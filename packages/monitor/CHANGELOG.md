@@ -2,6 +2,7 @@
 
 ## 0.5.0
 
+- **Paths renamed from `rum` to `a11y`:** the loader fetches `/api/a11y/config`, the hosted engine is `/a11y/<version>/engine.js`, and the hosted loader is `https://accessible.so/a11y/loader.js`. Generic "RUM" block-list rules no longer match them.
 - Built against @accessible-so/monitor-core 0.5.0 (idle-window collection; see its changelog).
 - **The loader defaults to `https://app.accessible.so` for config and beacons** (was the loader's own origin), so the hosted loader at `https://accessible.so/rum/loader.js` needs only `data-site-key`. Served from `https://accessible.so`, it loads the engine version the app's config names (`minCollector`, `/rum/<version>/engine.js`), so a hosted engine always matches what ingest accepts. Self-hosted, the engine is still the sibling `engine.js`, and `data-engine` still wins.
 

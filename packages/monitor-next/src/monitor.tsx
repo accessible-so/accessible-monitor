@@ -8,7 +8,7 @@ import { basePrefix, pathKey } from './path-key';
 import { RouteMap, routePatternFor } from './route-pattern';
 
 export const DEFAULT_ENDPOINT = 'https://app.accessible.so';
-export const DEFAULT_LOADER_SRC = 'https://accessible.so/rum/loader.js';
+export const DEFAULT_LOADER_SRC = 'https://accessible.so/a11y/loader.js';
 
 export interface AccessibleMonitorProps {
   siteKey: string;
@@ -16,7 +16,7 @@ export interface AccessibleMonitorProps {
   endpoint?: string;
   /**
    * The loader's URL, to self-host it (the engine is read from `engine.js` next
-   * to it). Defaults to Accessible's copy, or `<endpoint>/rum/loader.js` when
+   * to it). Defaults to Accessible's copy, or `<endpoint>/a11y/loader.js` when
    * `endpoint` is set.
    */
   src?: string;
@@ -26,7 +26,7 @@ export interface AccessibleMonitorProps {
 export function loaderAttributes({ siteKey, endpoint = DEFAULT_ENDPOINT, src }: AccessibleMonitorProps) {
   const custom = endpoint !== DEFAULT_ENDPOINT;
   return {
-    src: src ?? (custom ? `${endpoint}/rum/loader.js` : DEFAULT_LOADER_SRC),
+    src: src ?? (custom ? `${endpoint}/a11y/loader.js` : DEFAULT_LOADER_SRC),
     'data-site-key': siteKey,
     ...(custom ? { 'data-endpoint': endpoint } : {}),
   };

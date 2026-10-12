@@ -105,7 +105,7 @@ and [`protocol/attr-policy.ts`](../packages/monitor-core/src/protocol/attr-polic
   *pageviews* rather than 5% of *sessions*; a visitor reading twenty pages would
   be near-certain to be collected on one of them. The record is a session id and
   one bit, it lives in `sessionStorage`, and it is gone when the tab closes.
-- The rate comes from `GET /api/rum/config`. A `boosted` entry whose `pattern`
+- The rate comes from `GET /api/a11y/config`. A `boosted` entry whose `pattern`
   matches the current path can **raise** the rate for that path, never lower it.
   Patterns use `[param]` for one non-empty segment and `[...rest]`, only as the
   last segment, for one or more.

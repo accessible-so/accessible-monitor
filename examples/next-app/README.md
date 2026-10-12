@@ -16,7 +16,7 @@ Three routes, each with a deliberate barrier:
 
 ## Running it
 
-The collector bundles must exist (the app loads `/rum/loader.js` from the
+The collector bundles must exist (the app loads `/a11y/loader.js` from the
 fixture server, not from a CDN), so build them first, then start the fixture
 server and the app against it:
 

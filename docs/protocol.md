@@ -152,7 +152,7 @@ contract is otherwise frozen at `v: 1`.
 
 ---
 
-## Config (`GET /api/rum/config?k=<site key>`)
+## Config (`GET /api/a11y/config?k=<site key>`)
 
 Fetched by the loader on every pageview of a sampled session, and once for an
 unsampled one. `credentials: 'omit'` — no cookies are sent.
@@ -164,9 +164,9 @@ unsampled one. `credentials: 'omit'` — no cookies are sent.
 | `sampleRate` | `number` | 0–1. The decision is made once per session and is sticky. |
 | `boosted` | `{ pattern, rate }[]` | Per-route-pattern rates that may **raise** the base rate for matching paths. |
 | `endpoint` | `string` | Where beacons go. |
-| `minCollector` | `string` | The oldest collector version the server will accept. The loader served from `https://accessible.so` loads this version's engine (`/rum/<minCollector>/engine.js`, only if it is `x.y.z`). |
+| `minCollector` | `string` | The oldest collector version the server will accept. The loader served from `https://accessible.so` loads this version's engine (`/a11y/<minCollector>/engine.js`, only if it is `x.y.z`). |
 
-## Ingest (`POST /api/rum/ingest`)
+## Ingest (`POST /api/a11y/ingest`)
 
 One `RumBeacon` as JSON, sent with `navigator.sendBeacon` (a `Blob`) and falling
 back to `fetch(..., { keepalive: true, credentials: 'omit' })`. The response is

@@ -5,9 +5,9 @@ import path from 'node:path';
 const loaderSrc = readFileSync(path.resolve(__dirname, '../../dist/loader.js'), 'utf8');
 
 const SITE_KEY = 'acc_rum_' + 'a'.repeat(24);
-const LOADER_SRC_URL = 'http://cdn.test/rum/loader.js';
-const ENGINE_URL = 'http://cdn.test/rum/engine.js';
-const CONFIG_URL = `http://cdn.test/api/rum/config?k=${SITE_KEY}`;
+const LOADER_SRC_URL = 'http://cdn.test/a11y/loader.js';
+const ENGINE_URL = 'http://cdn.test/a11y/engine.js';
+const CONFIG_URL = `http://cdn.test/api/a11y/config?k=${SITE_KEY}`;
 
 function makeScript(attrs: Record<string, string> = {}): HTMLScriptElement {
   const el = document.createElement('script');
@@ -206,26 +206,26 @@ describe('where the loader sends config and finds the engine', () => {
   it('talks to https://app.accessible.so when data-endpoint is absent, wherever the loader is served from', async () => {
     const fetchMock = sampled();
     vi.stubGlobal('fetch', fetchMock);
-    setCurrentScript(makeScript({ src: 'https://accessible.so/rum/loader.js', 'data-endpoint': '' }));
+    setCurrentScript(makeScript({ src: 'https://accessible.so/a11y/loader.js', 'data-endpoint': '' }));
     runLoader();
     await flush();
-    expect(fetchMock).toHaveBeenCalledWith(`https://app.accessible.so/api/rum/config?k=${SITE_KEY}`, { credentials: 'omit' });
+    expect(fetchMock).toHaveBeenCalledWith(`https://app.accessible.so/api/a11y/config?k=${SITE_KEY}`, { credentials: 'omit' });
   });
 
   it('served by Accessible, loads the engine version the app names', async () => {
     vi.stubGlobal('fetch', sampled({ minCollector: '0.5.0' }));
-    setCurrentScript(makeScript({ src: 'https://accessible.so/rum/loader.js' }));
+    setCurrentScript(makeScript({ src: 'https://accessible.so/a11y/loader.js' }));
     runLoader();
     await flush();
-    expect(engineSrc()).toBe('https://accessible.so/rum/0.5.0/engine.js');
+    expect(engineSrc()).toBe('https://accessible.so/a11y/0.5.0/engine.js');
   });
 
   it.each([undefined, '../x', '0.5', '0.5.0/../../evil'])('served by Accessible with minCollector %s, falls back to the sibling engine', async (v) => {
     vi.stubGlobal('fetch', sampled(v === undefined ? {} : { minCollector: v }));
-    setCurrentScript(makeScript({ src: 'https://accessible.so/rum/loader.js' }));
+    setCurrentScript(makeScript({ src: 'https://accessible.so/a11y/loader.js' }));
     runLoader();
     await flush();
-    expect(engineSrc()).toBe('https://accessible.so/rum/engine.js');
+    expect(engineSrc()).toBe('https://accessible.so/a11y/engine.js');
   });
 
   it('self-hosted, loads the engine next to the loader whatever version the app names', async () => {
@@ -238,7 +238,7 @@ describe('where the loader sends config and finds the engine', () => {
 
   it('data-engine wins over both', async () => {
     vi.stubGlobal('fetch', sampled({ minCollector: '0.5.0' }));
-    setCurrentScript(makeScript({ src: 'https://accessible.so/rum/loader.js', 'data-engine': 'https://cdn.customer.example/e.js' }));
+    setCurrentScript(makeScript({ src: 'https://accessible.so/a11y/loader.js', 'data-engine': 'https://cdn.customer.example/e.js' }));
     runLoader();
     await flush();
     expect(engineSrc()).toBe('https://cdn.customer.example/e.js');
