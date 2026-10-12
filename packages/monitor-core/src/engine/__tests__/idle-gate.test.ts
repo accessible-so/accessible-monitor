@@ -192,6 +192,19 @@ describe('IdleGate', () => {
       gate.detach();
     });
 
+    it('is not cleared by an element losing focus, which is what a press usually causes', () => {
+      document.body.innerHTML = '<input id="field"><button id="target">drag me</button>';
+      document.getElementById('field')!.focus();
+      const gate = IdleGate({ win: window, doc: document });
+      press();
+      // The press moves focus: the field blurs. That is not the window losing focus.
+      document.getElementById('target')!.focus();
+      vi.advanceTimersByTime(3000);
+      expect(gate.isOpen(), 'an element blur released the press mid-drag').toBe(false);
+      gate.detach();
+      document.body.innerHTML = '';
+    });
+
     it('is cleared when the page is hidden', () => {
       const gate = IdleGate({ win: window, doc: document });
       press();

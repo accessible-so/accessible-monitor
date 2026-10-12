@@ -80,7 +80,10 @@ export function IdleGate(options: IdleGateOptions): IdleGateApi {
   doc.addEventListener('pointerdown', onDown, listen);
   doc.addEventListener('pointerup', onRelease, listen);
   doc.addEventListener('pointercancel', onRelease, listen);
-  win.addEventListener('blur', onRelease, listen);
+  // Only the window itself losing focus (alt-tab, a click into an iframe) can
+  // lose a release. Element blurs — which a press usually causes — do not
+  // bubble, so registering without capture keeps them out.
+  win.addEventListener('blur', onRelease, { passive: true });
   if (!loaded) win.addEventListener('load', onLoad);
   doc.addEventListener('visibilitychange', onVisibilityChange, listen);
   restartQuiet();
@@ -101,7 +104,7 @@ export function IdleGate(options: IdleGateOptions): IdleGateApi {
       doc.removeEventListener('pointerdown', onDown, listen);
       doc.removeEventListener('pointerup', onRelease, listen);
       doc.removeEventListener('pointercancel', onRelease, listen);
-      win.removeEventListener('blur', onRelease, listen);
+      win.removeEventListener('blur', onRelease);
       win.removeEventListener('load', onLoad);
       doc.removeEventListener('visibilitychange', onVisibilityChange, listen);
     },
