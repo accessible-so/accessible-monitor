@@ -12,8 +12,10 @@
  * (measured: 3.7x the first run at 120 elements, 17.6x at 1,121).
  *
  * The coefficients bound the fixtures measured in methodology §4.1, which are
- * heavier per element than real pages. A part that has run once this session
- * replaces the model with its own measured ratio (`learnedFactor`), up or down.
+ * heavier per element than real pages, and the model's error depends on the
+ * page's size (on one real site it was 2.4x low at 85 elements and 0.55x high
+ * at 446). A part that has run this session on a page of similar size
+ * (`LEARNED_SPAN`) replaces the model with its measured ratio, up or down.
  */
 import type { PageTier } from '../protocol/types';
 import { IDLE_BUDGET_MS } from './scheduler';
@@ -30,8 +32,49 @@ export const LEARNED_HEADROOM = 1.25;
 /** A measured ratio below this is treated as this: one lucky run never makes a part nearly free. */
 export const LEARNED_FLOOR = 0.25;
 
+/** A measurement applies to pages up to this many times larger or smaller than the one measured. */
+export const LEARNED_SPAN = 2;
+/** Measurements kept per part, the most recent last. */
+export const LEARNED_MAX_POINTS = 16;
+
+/** A measured run: the page's element count and the part's `actualMs / modelMs`. */
+export type LearnedPoint = [elements: number, ratio: number];
+export type Learned = Partial<Record<DocCostPartName, LearnedPoint[]>>;
+
+/** The valid points of a stored value: anything else (an older format, a bad write) is dropped. */
+export function cleanPoints(v: unknown): LearnedPoint[] {
+  if (!Array.isArray(v)) return [];
+  return v.filter((p): p is LearnedPoint =>
+    Array.isArray(p) && p.length === 2 && typeof p[0] === 'number' && typeof p[1] === 'number'
+    && Number.isFinite(p[0]) && p[0] >= 0 && Number.isFinite(p[1]) && p[1] > 0);
+}
+
+/** `a` then `b`, keeping the larger ratio for an element count seen in both, capped to the most recent. */
+export function mergePoints(a: LearnedPoint[], b: LearnedPoint[]): LearnedPoint[] {
+  const byElements = new Map<number, number>();
+  for (const [n, r] of [...a, ...b]) {
+    const prev = byElements.get(n);
+    byElements.delete(n); // re-insert: the latest measurement of a size counts as recent
+    byElements.set(n, Math.max(prev ?? 0, r));
+  }
+  return [...byElements].slice(-LEARNED_MAX_POINTS);
+}
+
 /**
- * The factor on the model for a part whose largest measured `actualMs / modelMs`
+ * The largest measured ratio from a page within `LEARNED_SPAN` of this one's
+ * size, or undefined (the pure model) when none was that close.
+ */
+export function learnedRatio(points: readonly LearnedPoint[] | undefined, elements: number): number | undefined {
+  let best: number | undefined;
+  for (const [n, r] of points ?? []) {
+    if (Math.max(n, elements) > LEARNED_SPAN * Math.max(1, Math.min(n, elements))) continue;
+    best = Math.max(best ?? 0, r);
+  }
+  return best;
+}
+
+/**
+ * The factor on the model for a part whose largest nearby measured `actualMs / modelMs`
  * this session is `measured`: 1 (the pure model) before any measurement.
  */
 export function learnedFactor(measured: number | undefined): number {

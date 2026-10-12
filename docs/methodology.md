@@ -286,26 +286,36 @@ a ceiling, the model would keep such a site's contrast and landmark checks out o
 every idle window, so they would never run while the visitor reads. A site proves
 it is cheaper with one measured run. After a part completes (`ok`) in an idle
 window or at tab-hide, the ratio `actualMs / modelMs` (the model with no factor)
-is recorded, and the part's factor becomes:
+is recorded with the page's element count, and the part's factor becomes:
 
-- no measurement yet, on this page or earlier in the session: `1`, the pure model.
-  The first page of a session always uses the pure model;
+- no measurement from a page within 2x of this page's size (`LEARNED_SPAN`), on
+  this page or earlier in the session: `1`, the pure model. The first page of a
+  session always uses the pure model;
 - otherwise `max(0.25, measured) × 1.25`, where `measured` is the **largest**
-  ratio seen for that part this session (`LEARNED_FLOOR`, `LEARNED_HEADROOM`).
-  A heavier page raises it; it never falls below the highest measurement. The
-  floor stops one lucky run making a part nearly free; the headroom covers a next
-  page a little heavier than the one measured.
+  ratio measured for that part on a page within 2x of this one's size
+  (`LEARNED_FLOOR`, `LEARNED_HEADROOM`). The floor stops one lucky run making a
+  part nearly free; the headroom covers a page a little heavier than the one
+  measured.
 
-The maximum persists across views and across the pages of a session (kept in
-`sessionStorage`, the larger value per part winning; a stored value is used only
-if finite and above 0). The same factor feeds the tier, so `fast` means every
-part's actual prediction fits a window.
+Measurements are kept per size because the model's error depends on the page's
+size. On the same real site, contrast cost 2.4x the model on an 85-element page
+and 0.55x on a 446-element one: a single session-wide maximum let the small page
+keep the large page's contrast out of every window. A measurement from a page
+more than twice as large or as small says nothing about this one.
+
+The points persist across views and across the pages of a session
+(`sessionStorage`, `[elements, ratio]` per part, the larger ratio winning for an
+element count seen twice, the 16 most recent kept; a point is used only if its
+count is a finite number at or above 0 and its ratio finite and above 0). The
+same factor feeds the tier, so `fast` means every part's actual prediction fits a
+window.
 
 The risk, stated plainly: the factor can be below 1, so a later page that is
-heavier per element than the one measured can be under-predicted and overrun a
-window until its own run raises the maximum. A window task that runs over 150 ms
-is counted in `perf.windowOverruns` (only tasks that had a prediction count), so
-this shows in field data and the coefficients or headroom can be raised.
+heavier per element than a similar-sized one measured can be under-predicted and
+overrun a window until its own run raises the ratio for its size. A window task
+that runs over 150 ms is counted in `perf.windowOverruns` (only tasks that had a
+prediction count), so this shows in field data and the coefficients or headroom
+can be raised.
 
 The **tier** names what the predictions said, per view (`perf.tier`):
 

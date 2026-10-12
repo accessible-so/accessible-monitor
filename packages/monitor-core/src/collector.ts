@@ -22,8 +22,8 @@ import { DirtyTracker } from './engine/dirty';
 import { Scheduler } from './engine/scheduler';
 import type { SchedulerPerf } from './engine/scheduler';
 import { IdleGate } from './engine/idle-gate';
-import { slower } from './engine/tier';
-import type { DocCostPartName } from './engine/tier';
+import { PART_COST, cleanPoints, mergePoints, slower } from './engine/tier';
+import type { DocCostPartName, Learned } from './engine/tier';
 import { Engine, countElements } from './engine/index';
 import type { AxeLike, AxeNodeLike, AxeViolationLike } from './engine/axe-runner';
 import { resolveNodeElement } from './engine/axe-runner';
@@ -192,20 +192,16 @@ function wire(opts: StartOptions, win: Window & Flagged, doc: Document, life: Li
     now: opts.now,
     debug,
     firstRunInWindow: store.get<PageTier>(TIER_KEY) === 'slow' && gate !== undefined,
-    learned: store.get<Partial<Record<DocCostPartName, number>>>(LEARNED_KEY) ?? undefined,
+    learned: store.get<Learned>(LEARNED_KEY) ?? undefined,
     onLearned: (learned) => {
       try {
-        // The largest measured ratio any page of the session has produced: a heavier page raises it, a lighter one never lowers it.
-        const stored = store.get<Partial<Record<DocCostPartName, number>>>(LEARNED_KEY) ?? {};
-        // Start from what is stored (another collector on the origin may have written a part this one never measured).
-        const merged: Record<string, number> = {};
-        for (const [part, v] of Object.entries(stored)) {
-          if (typeof v === 'number' && Number.isFinite(v) && v > 0) merged[part] = v;
-        }
-        for (const part of Object.keys(learned) as DocCostPartName[]) {
-          const mine = learned[part];
-          if (mine === undefined) continue;
-          merged[part] = Math.max(merged[part] ?? 0, mine);
+        // Every page's measurement, kept with its size: the engine uses those from pages of similar size.
+        // Start from what is stored (another collector on the origin may have written points this one never saw).
+        const stored = store.get<Record<string, unknown>>(LEARNED_KEY) ?? {};
+        const merged: Learned = {};
+        for (const part of Object.keys(PART_COST) as DocCostPartName[]) {
+          const points = mergePoints(cleanPoints(stored[part]), learned[part] ?? []);
+          if (points.length) merged[part] = points;
         }
         store.set(LEARNED_KEY, merged);
       } catch (err) { debug('learned store failed', err); }

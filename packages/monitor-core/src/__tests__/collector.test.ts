@@ -819,13 +819,14 @@ describe('idle windows', () => {
     await wait(60);
     await settle();
     expect(regionRuns(first), 'the first page runs region in its window').toBe(1);
-    const learned = JSON.parse(sessionStorage.getItem('a11y_rum_learned')!) as Record<string, number>;
-    expect(learned.region, 'region was measured').toBeGreaterThan(0);
+    const learned = JSON.parse(sessionStorage.getItem('a11y_rum_learned')!) as Record<string, [number, number][]>;
+    expect(learned.region![0]![1], 'region was measured').toBeGreaterThan(0);
+    const n = learned.region![0]![0];
 
     for (const h of handles.splice(0)) h.stop();
     delete (window as unknown as Record<string, unknown>).__accessibleRumStarted;
-    // A larger ratio from another page is kept (max wins), and starts the next page's model.
-    sessionStorage.setItem('a11y_rum_learned', JSON.stringify({ ...learned, region: 1000 }));
+    // A larger ratio from another page of this size is kept (max wins), and starts the next page's model.
+    sessionStorage.setItem('a11y_rum_learned', JSON.stringify({ ...learned, region: [[n, 1000]] }));
     const second = fakeAxe();
     let clock2 = 0;
     startWith(second, { idleQuietMs: 20, now: () => (clock2 += 5) });
@@ -833,7 +834,7 @@ describe('idle windows', () => {
     await wait(60);
     await settle();
     expect(regionRuns(second), 'region was predicted over the window and waits for tab-hide').toBe(0);
-    expect(JSON.parse(sessionStorage.getItem('a11y_rum_learned')!).region).toBe(1000);
+    expect(JSON.parse(sessionStorage.getItem('a11y_rum_learned')!).region).toEqual([[n, 1000]]);
   });
 
   it('keeps a stored part this collector did not measure', async () => {
@@ -845,13 +846,13 @@ describe('idle windows', () => {
     startWith(axe, { idleQuietMs: 100000, now: () => clock });
     await settle();
     // Another collector on the origin (an iframe) writes region after this one started.
-    sessionStorage.setItem('a11y_rum_learned', JSON.stringify({ region: 1e6 }));
+    sessionStorage.setItem('a11y_rum_learned', JSON.stringify({ region: [[5000, 1e6]] }));
     setVisibility('hidden');
     document.dispatchEvent(new Event('visibilitychange'));
     await settle();
-    const stored = JSON.parse(sessionStorage.getItem('a11y_rum_learned')!) as Record<string, number>;
-    expect(stored.region, 'the other collector\'s region ratio survives').toBeGreaterThanOrEqual(1e6);
-    expect(stored.grid).toBeGreaterThan(0);
+    const stored = JSON.parse(sessionStorage.getItem('a11y_rum_learned')!) as Record<string, [number, number][]>;
+    expect(stored.region, 'the other collector\'s region point survives').toContainEqual([5000, 1e6]);
+    expect(stored.grid![0]![1]).toBeGreaterThan(0);
   });
 
   it('a cheap site proves itself on page 1 (tab-hide run), and page 2 runs the grid part in an idle window', async () => {
@@ -881,9 +882,9 @@ describe('idle windows', () => {
     document.dispatchEvent(new Event('visibilitychange'));
     await settle();
     expect(gridRuns(one.axe), 'ran at tab-hide').toBe(1);
-    const stored = JSON.parse(sessionStorage.getItem('a11y_rum_learned')!) as Record<string, number>;
-    expect(stored.grid, 'measured ratio, below 1').toBeGreaterThan(0);
-    expect(stored.grid).toBeLessThan(0.25);
+    const stored = JSON.parse(sessionStorage.getItem('a11y_rum_learned')!) as Record<string, [number, number][]>;
+    expect(stored.grid![0]![1], 'measured ratio, below 1').toBeGreaterThan(0);
+    expect(stored.grid![0]![1]).toBeLessThan(0.25);
 
     for (const h of handles.splice(0)) h.stop();
     delete (window as unknown as Record<string, unknown>).__accessibleRumStarted;

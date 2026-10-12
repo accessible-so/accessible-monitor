@@ -21,7 +21,8 @@ import {
   runPage,
 } from '../axe-runner';
 import type { AxeLike, AxeResultsLike } from '../axe-runner';
-import { Engine } from '../index';
+import { Engine, countElements } from '../index';
+import type { Learned } from '../tier';
 import { Scheduler } from '../scheduler';
 import { RumBeaconSchema } from '../../protocol/schema';
 import type { IdleGateApi } from '../idle-gate';
@@ -149,7 +150,7 @@ describe('the document-cost rule set', () => {
 describe('Engine document-cost scheduling', () => {
   function build(
     axe: AxeLike,
-    o: { contrastDeferMaxElements?: number; chunkMax?: number; gate?: IdleGateApi; now?: () => number; firstRunInWindow?: boolean; learned?: Record<string, number>; onLearned?: (l: Record<string, number>) => void } = {},
+    o: { contrastDeferMaxElements?: number; chunkMax?: number; gate?: IdleGateApi; now?: () => number; firstRunInWindow?: boolean; learned?: Learned; onLearned?: (l: Learned) => void } = {},
   ) {
     const scheduler = Scheduler({ win: idleWindow(), chunkMax: o.chunkMax, gate: o.gate });
     const engine = Engine({
@@ -161,11 +162,14 @@ describe('Engine document-cost scheduling', () => {
       contrastDeferMaxElements: o.contrastDeferMaxElements ?? 3000,
       now: o.now,
       firstRunInWindow: o.firstRunInWindow,
-      learned: o.learned,
-      onLearned: o.onLearned as never,
+        learned: o.learned,
+      onLearned: o.onLearned,
     });
     return { scheduler, engine };
   }
+
+  /** One measurement, taken on a page the size of the current body. */
+  const here = (ratio: number): [number, number][] => [[countElements(document.body), ratio]];
 
   const documentCostRuns = (axe: AxeLike & { calls: Call[] }): Call[] =>
     axe.calls.filter((c) => DOCUMENT_COST_PARTS.some((p) => p.rules === c.options.runOnly?.values));
@@ -463,19 +467,19 @@ describe('Engine document-cost scheduling', () => {
     const cost = { page: firstRun, grid: 80, region: 1, chunk: 5 };
     expect(firstRun).toBeLessThan(50);
     const c1 = costedAxe(cost);
-    const seen: Record<string, number>[] = [];
+    const seen: Learned[] = [];
     const first = build(c1.axe, { gate: manualGate(), now: c1.now, onLearned: (l) => seen.push(l) });
     first.engine.scanFull();
     await micro();
     expect(first.engine.predictedPartMs('grid')).toBeCloseTo(200, 5);
     expect(documentCostRuns(c1.axe), 'over the window: waits for tab-hide').toHaveLength(0);
     await first.scheduler.drain();
-    expect(seen.at(-1)!.grid).toBeCloseTo(0.4, 5);
+    expect(seen.at(-1)!.grid![0]![1]).toBeCloseTo(0.4, 5);
     first.engine.stop();
 
     const c2 = costedAxe(cost);
     const gate = manualGate();
-    const second = build(c2.axe, { gate, now: c2.now, learned: { grid: 0.4 } });
+    const second = build(c2.axe, { gate, now: c2.now, learned: { grid: here(0.4) } });
     second.engine.scanFull();
     await micro();
     expect(second.engine.predictedPartMs('grid')).toBeCloseTo(200 * 0.4 * 1.25, 5);
@@ -487,20 +491,38 @@ describe('Engine document-cost scheduling', () => {
   it('floors the ratio at 0.25 before the headroom', async () => {
     document.body.innerHTML = '<main><p>small</p></main>';
     const c = costedAxe({ page: 10, grid: 20, region: 60, chunk: 5 });
-    const { engine } = build(c.axe, { gate: manualGate(), now: c.now, learned: { grid: 0.05 } });
+    const { engine } = build(c.axe, { gate: manualGate(), now: c.now, learned: { grid: here(0.05) } });
     engine.scanFull();
     await micro();
     expect(engine.predictedPartMs('grid')).toBeCloseTo(10 * (3 + 30 / 1000) * 0.25 * 1.25, 5);
   });
 
+  it('uses only measurements from pages within 2x of this page\'s size', async () => {
+    document.body.innerHTML = `<main>${'<p>x</p>'.repeat(99)}</main>`; // 100 elements
+    const n = countElements(document.body);
+    expect(n).toBe(100);
+    const model = 10 * (3 + (15 * n) / 1000);
+    const predict = async (learned: Learned): Promise<number> => {
+      const c = costedAxe({ page: 10, grid: 20, region: 1, chunk: 5 });
+      const { engine } = build(c.axe, { gate: manualGate(), now: c.now, learned });
+      engine.scanFull();
+      await micro();
+      return engine.predictedPartMs('grid')!;
+    };
+    expect(await predict({ grid: [[201, 3]] }), 'over 2x larger: the pure model').toBeCloseTo(model, 5);
+    expect(await predict({ grid: [[49, 3]] }), 'over 2x smaller: the pure model').toBeCloseTo(model, 5);
+    expect(await predict({ grid: [[200, 0.5], [50, 0.6]] }), 'both within 2x: the larger ratio').toBeCloseTo(model * 0.6 * 1.25, 5);
+    expect(await predict({ grid: [[446, 0.55], [60, 0.5], [30, 2.4]] }), 'a far small page does not raise it').toBeCloseTo(model * 0.5 * 1.25, 5);
+  });
+
   it('a heavier later measurement raises the maximum; a lighter one leaves it', async () => {
     document.body.innerHTML = '<main><p>small</p></main>';
     const model = 10 * (3 + 30 / 1000);
-    const seen: Record<string, number>[] = [];
-    const run = async (grid: number, learned?: Record<string, number>) => {
+    const seen: Learned[] = [];
+    const run = async (grid: number, learned?: Learned) => {
       const c = costedAxe({ page: 10, grid, region: 1, chunk: 5 });
       const gate = manualGate();
-      const { engine } = build(c.axe, { gate, now: c.now, learned: { region: 5, ...learned }, onLearned: (l) => seen.push(l) });
+      const { engine } = build(c.axe, { gate, now: c.now, learned: { region: here(5), ...learned }, onLearned: (l) => seen.push(l) });
       engine.scanFull();
       await micro();
       gate.open();
@@ -508,13 +530,13 @@ describe('Engine document-cost scheduling', () => {
       return engine;
     };
     await run(0.4 * model);
-    expect(seen.at(-1)!.grid).toBeCloseTo(0.4, 5);
+    expect(seen.at(-1)!.grid![0]![1]).toBeCloseTo(0.4, 5);
     const calls = seen.length;
-    const heavier = await run(0.9 * model, { grid: 0.4 });
-    expect(seen.at(-1)!.grid).toBeCloseTo(0.9, 5);
+    const heavier = await run(0.9 * model, { grid: here(0.4) });
+    expect(seen.at(-1)!.grid).toEqual(here(0.9).map(([n, r]) => [n, expect.closeTo(r, 5)]));
     expect(heavier.predictedPartMs('grid')).toBeCloseTo(model * 0.9 * 1.25, 5);
     const n = seen.length;
-    const lighter = await run(0.2 * model, { grid: 0.4 });
+    const lighter = await run(0.2 * model, { grid: here(0.4) });
     expect(seen.length, 'a lighter measurement changes nothing and reports nothing').toBe(n);
     expect(lighter.predictedPartMs('grid')).toBeCloseTo(model * 0.4 * 1.25, 5);
     expect(calls).toBeGreaterThan(0);
@@ -585,23 +607,25 @@ describe('Engine document-cost scheduling', () => {
     const regionBase = base.engine.predictedPartMs('region')!;
 
     const two = costedAxe(cost);
-    const d = build(two.axe, { gate: manualGate(), now: two.now, learned: { region: 2 } });
+    const d = build(two.axe, { gate: manualGate(), now: two.now, learned: { region: here(2) } });
     d.engine.scanFull();
     await micro();
     expect(d.engine.predictedPartMs('region')).toBeCloseTo(regionBase * 2 * 1.25, 5);
 
     const half = costedAxe(cost);
-    const h = build(half.axe, { gate: manualGate(), now: half.now, learned: { region: 0.5 } });
+    const h = build(half.axe, { gate: manualGate(), now: half.now, learned: { region: here(0.5) } });
     h.engine.scanFull();
     await micro();
     expect(h.engine.predictedPartMs('region'), 'below 1 is a measurement now').toBeCloseTo(regionBase * 0.5 * 1.25, 5);
 
-    for (const bad of [0, NaN, Infinity, -1]) {
+    const n = countElements(document.body);
+    const bads: unknown[] = [[[n, 0]], [[n, NaN]], [[n, Infinity]], [[n, -1]], [[-1, 2]], [[n]], 2, 'x', null];
+    for (const bad of bads) {
       const c = costedAxe(cost);
-      const b = build(c.axe, { gate: manualGate(), now: c.now, learned: { region: bad } });
+      const b = build(c.axe, { gate: manualGate(), now: c.now, learned: { region: bad as never } });
       b.engine.scanFull();
       await micro();
-      expect(b.engine.predictedPartMs('region'), `${bad} was not ignored`).toBeCloseTo(regionBase, 5);
+      expect(b.engine.predictedPartMs('region'), `${JSON.stringify(bad)} was not ignored`).toBeCloseTo(regionBase, 5);
     }
   });
 
@@ -613,7 +637,7 @@ describe('Engine document-cost scheduling', () => {
     await micro();
     expect(fast.scheduler.perf().tier).toBe('fast');
     const c = costedAxe({ page: 10, grid: 20, region: 20, chunk: 5 });
-    const slowish = build(c.axe, { gate: manualGate(), now: c.now, learned: { grid: 10 } });
+    const slowish = build(c.axe, { gate: manualGate(), now: c.now, learned: { grid: here(10) } });
     slowish.engine.scanFull();
     await micro();
     expect(slowish.scheduler.perf().tier).toBe('medium');
@@ -747,7 +771,7 @@ describe('Engine document-cost scheduling', () => {
         return base.run(context, options);
       },
     };
-    const seen: Record<string, number>[] = [];
+    const seen: Learned[] = [];
     const { engine, scheduler } = build(axe, { onLearned: (l) => seen.push(l) });
     engine.scanFull();
     await micro();

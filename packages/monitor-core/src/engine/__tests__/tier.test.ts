@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { LEARNED_FLOOR, LEARNED_HEADROOM, PART_COST, learnedFactor, pageTier, predictPartMs, slower } from '../tier';
+import { LEARNED_FLOOR, LEARNED_HEADROOM, LEARNED_MAX_POINTS, PART_COST, cleanPoints, learnedFactor, learnedRatio, mergePoints, pageTier, predictPartMs, slower } from '../tier';
 
 describe('page tier', () => {
   it('is fast when chunks fit the active budget and every part fits an idle window', () => {
@@ -54,6 +54,29 @@ describe('learnedFactor', () => {
     expect(learnedFactor(0.4)).toBeCloseTo(0.5, 10);
     expect(learnedFactor(0.05)).toBeCloseTo(0.25 * 1.25, 10);
     expect(learnedFactor(2)).toBe(2.5);
+  });
+});
+
+describe('learned points', () => {
+  it('learnedRatio takes the largest ratio from pages within 2x, else none', () => {
+    expect(learnedRatio(undefined, 100)).toBeUndefined();
+    expect(learnedRatio([[446, 0.55], [85, 2.4]], 446)).toBe(0.55);
+    expect(learnedRatio([[446, 0.55], [85, 2.4]], 85)).toBe(2.4);
+    expect(learnedRatio([[446, 0.55], [85, 2.4]], 170)).toBe(2.4);
+    expect(learnedRatio([[446, 0.55], [85, 2.4]], 300)).toBe(0.55);
+    expect(learnedRatio([[446, 0.55]], 222)).toBeUndefined();
+    expect(learnedRatio([[0, 0.5]], 2), 'an empty page counts as one element').toBe(0.5);
+  });
+  it('mergePoints keeps the larger ratio per size and the most recent points', () => {
+    expect(mergePoints([[10, 1], [20, 2]], [[10, 0.5], [30, 3]])).toEqual([[20, 2], [10, 1], [30, 3]]);
+    const many = Array.from({ length: LEARNED_MAX_POINTS + 4 }, (_, i): [number, number] => [i, 1]);
+    const kept = mergePoints([], many);
+    expect(kept).toHaveLength(LEARNED_MAX_POINTS);
+    expect(kept.at(-1)![0]).toBe(LEARNED_MAX_POINTS + 3);
+  });
+  it('cleanPoints drops anything not [elements >= 0, ratio > 0]', () => {
+    expect(cleanPoints(2)).toEqual([]);
+    expect(cleanPoints([[1, 2], [1, 0], [-1, 1], [1], 'x', [NaN, 1], [1, Infinity]])).toEqual([[1, 2]]);
   });
 });
 
