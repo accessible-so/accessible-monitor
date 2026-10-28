@@ -8,7 +8,7 @@
   "scripts": {
     "build": "pnpm -r --filter \"./packages/*\" build",
     "test": "pnpm -r --filter \"./packages/*\" test",
-    "test:browser": "pnpm -r --filter \"./packages/*\" test:browser",
+    "test:browser": "pnpm -r --workspace-concurrency=1 --filter \"./packages/*\" test:browser",
     "typecheck": "pnpm -r --filter \"./packages/*\" typecheck",
     "demo": "node examples/dev-server.mjs 4173 --verbose"
   }
