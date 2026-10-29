@@ -57,6 +57,14 @@ jobs:
       # pnpm pack rewrites workspace:^ to real ranges; npm publish does the
       # OIDC exchange. Versions already on npm are skipped, so a re-run after a
       # partial failure picks up where it stopped.
+      # Names the account the token belongs to, and stops here (before any
+      # package goes out) when npm does not accept the token: a bad token
+      # otherwise surfaces as a 404 on the first publish.
+      - name: Check npm account
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm whoami
+
       - name: Publish new versions
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
