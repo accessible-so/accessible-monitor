@@ -1,5 +1,9 @@
 # @accessible-so/monitor-core
 
+## 0.5.1
+
+- **zod 4** (`^4.6.6`, was `^3.23.8`). zod before 4.6.6 can exhaust memory validating an oversized constrained collection (GHSA-mrhx-c7xc-m3w5), and the beacon schema in `/protocol` is what a server runs on untrusted input. The schema accepts and rejects exactly what it did before; no code changed. The browser bundle does not include zod.
+
 ## 0.5.0
 
 - **Beacons go to `/api/a11y/ingest`** (was `/api/rum/ingest`), so generic "RUM" block-list rules no longer match them.
