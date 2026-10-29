@@ -1,18 +1,16 @@
 # Every npm release comes from here; nobody publishes from a laptop.
 #
 # Runs the full CI gate first, then publishes each package whose version is not
-# on npm yet, in dependency order (core first). Bump versions, merge, then
-# either publish a GitHub release or run this workflow by hand.
+# on npm yet, in dependency order (core first). Bump versions, merge, then run
+#   gh workflow run publish.yml -R accessible-so/accessible-monitor
 #
-# Auth: npm trusted publishing (OIDC) — no stored token. The very first publish
-# of a package cannot use it (npm only lets you configure a trusted publisher on
-# a package that exists), so until then the `npm` environment holds a
-# short-lived NPM_TOKEN; delete it once every package has a trusted publisher.
+# Auth: npm trusted publishing (OIDC), no stored token. Each package's trusted
+# publisher names this workflow and the `npm` environment, and that environment
+# admits `main` only. That is also why there is no release trigger: a release
+# runs on its tag, which the environment refuses.
 name: Publish
 
 on:
-  release:
-    types: [published]
   workflow_dispatch:
 
 concurrency:
@@ -57,17 +55,7 @@ jobs:
       # pnpm pack rewrites workspace:^ to real ranges; npm publish does the
       # OIDC exchange. Versions already on npm are skipped, so a re-run after a
       # partial failure picks up where it stopped.
-      # Names the account the token belongs to, and stops here (before any
-      # package goes out) when npm does not accept the token: a bad token
-      # otherwise surfaces as a 404 on the first publish.
-      - name: Check npm account
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm whoami
-
       - name: Publish new versions
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
           test -s packages/monitor-next/swc/plugin.wasm
