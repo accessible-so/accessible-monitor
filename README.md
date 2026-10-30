@@ -146,7 +146,7 @@ pnpm add @accessible-so/monitor-next
 ```
 
 Peer dependencies: `next >=13.4 <17`, `react >=18`. Component attribution
-(the optional SWC plugin below) additionally requires Next 16 — see
+(the optional SWC plugin below) additionally requires Next 16.4 — see
 [Compatibility](#compatibility).
 
 **App Router** — render once, in the root layout:
@@ -226,27 +226,26 @@ build on a plugin it cannot resolve.
 
 | Next | SWC plugin ABI | Rust toolchain | wasm size | Bundlers |
 |---|---|---|---|---|
-| 16.3.5 | `swc_core` 73 — `swc_common` 23.0.2, `swc_ecma_ast` 25.0.0, `swc_plugin_runner` 30.0.1, which is what Next 16's `next-swc` binary links | 1.98.1, target `wasm32-wasip1`, `-C link-arg=--allow-undefined` (repo `.cargo/config.toml`) | ~764 KB | `next build --webpack` and `next build --turbopack` — both built and stamp-verified by the browser suite |
+| 16.4.0–16.4.3 | `swc_core` 79 — `swc_common` 26, `swc_ecma_ast` 29, `swc_plugin_runner` 34, which is what Next 16.4's `next-swc` binary links | 1.98.1, target `wasm32-wasip1`, `-C link-arg=--allow-undefined` (repo `.cargo/config.toml`) | ~768 KB | `next build --webpack` and `next build --turbopack` — both built and stamp-verified by the browser suite |
 
-**Component attribution is Next 16 only, and `withAccessible` enforces that
-itself.** An SWC plugin exchanges a serialized AST with its host, and the
-layout of that AST is fixed by the `swc_core` both sides were compiled
-against. Next 15 links `swc_core` 35 — nine majors of AST layout from ours —
-so loading this wasm there would not degrade, it would fail the build. So
-`withAccessible` reads the resolved `next/package.json` before registering
-anything and, on any other major, prints one line and hands your config back
+**Component attribution is Next 16.4 only, and `withAccessible` enforces it.**
+A wasm plugin and its host exchange a serialized AST whose layout is fixed by
+the `swc_core` both were built against, and Next moves that layout between
+minors: 16.3 links `swc_ecma_ast` 25 and 16.2 links 20, against our 29.
+Loading this wasm on any of them would fail the build rather than degrade.
+`withAccessible` reads the resolved `next/package.json` first and, on any
+other version (prereleases included), prints one line and returns your config
 untouched, exactly as it does when the wasm is missing:
 
-    [accessible] component attribution needs Next 16 (found 15.5.9); building without it
+    [accessible] component attribution needs Next 16.4.x (found 16.3.5); building without it
 
-One wasm cannot serve both majors. Everything else in the adapter — the
-components, route patterns, the loader — is plain Next API and keeps working
-across the whole peer range; only `finding.comp` is lost, and it is honestly
-`null` rather than guessed.
+One wasm serves one Next minor. The components, route patterns and loader
+are plain Next API and work across the whole peer range; only `finding.comp`
+is lost, and it is `null` rather than guessed.
 
 **Tested:** the App Router example (`examples/next-app`), end to end in a
 real Chromium, against both `next build --webpack` and `next build
---turbopack`, on Next 16.3.5. Both bundlers are named explicitly in the
+--turbopack`, on Next 16.4.1. Both bundlers are named explicitly in the
 harness: Turbopack is the default from Next 16 on, so a bare `next build`
 would silently make the webpack arm a second Turbopack build.
 

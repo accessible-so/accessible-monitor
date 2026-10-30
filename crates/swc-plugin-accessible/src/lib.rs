@@ -242,7 +242,7 @@ impl Stamper {
     /// Top-level `return` statements only. A `return` nested inside a branch or
     /// a callback is not reliably "the component's element", and walking into
     /// them would stamp helper closures with their enclosing component's name.
-    fn stamp_body(&self, body: &mut BlockStmt, component: &str, span: Span) {
+    fn stamp_body(&self, body: &mut FunctionBody, component: &str, span: Span) {
         for stmt in body.stmts.iter_mut() {
             if let Stmt::Return(ReturnStmt { arg: Some(arg), .. }) = stmt {
                 self.stamp_expr(arg, component, span);
@@ -311,8 +311,8 @@ impl VisitMut for Stamper {
         let span = id.span;
         match n.init.as_deref_mut() {
             Some(Expr::Arrow(arrow)) => match &mut *arrow.body {
-                BlockStmtOrExpr::BlockStmt(b) => self.stamp_body(b, &name, span),
-                BlockStmtOrExpr::Expr(e) => self.stamp_expr(e, &name, span),
+                ArrowFunctionBody::FunctionBody(b) => self.stamp_body(b, &name, span),
+                ArrowFunctionBody::Expr(e) => self.stamp_expr(e, &name, span),
             },
             // `const Price = function () {}`, and `const Price = function
             // Whatever() {}` too: the binding is what the rest of the module

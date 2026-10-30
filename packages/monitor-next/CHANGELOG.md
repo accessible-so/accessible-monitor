@@ -1,5 +1,11 @@
 # @accessible-so/monitor-next
 
+## 0.2.0
+
+- Component attribution now targets Next 16.4. The SWC plugin is rebuilt on `swc_core` 79 (`swc_ecma_ast` 29, `swc_plugin_runner` 34), which is what Next 16.4.0–16.4.3 link; 0.1.0's wasm, built for Next 16.3's `swc_ecma_ast` 25, fails `next build` on 16.4.
+- `withAccessible` now admits only stable Next 16.4.x. 0.1.0 admitted any Next 16, but Next changes its SWC AST between minors (16.2 links `swc_ecma_ast` 20, 16.3 links 25), so the plugin also failed the build on 16.0–16.2. On every other version, prereleases included, it prints `[accessible] component attribution needs Next 16.4.x (found <version>); building without it` and returns the config untouched. On Next 16.3, stay on 0.1.0 to keep attribution.
+- Route patterns, both components and the loader are unchanged and still work across the whole peer range (`next >=13.4 <17`). Verified end to end, under both `next build --webpack` and `next build --turbopack`, against Next 16.4.1.
+
 ## 0.1.0
 
 - The loader comes from `https://accessible.so/rum/loader.js`, or the `src` prop to self-host it; a custom `endpoint` serves the loader too. `data-endpoint` is rendered only for a non-default endpoint.

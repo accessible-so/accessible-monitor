@@ -31,27 +31,28 @@ export interface WithAccessibleOptions {
  * module specifier — an absolute path to `plugin.wasm` fails there with
  * `Module not found`. The specifier form was verified to build and to stamp
  * correctly under both `next build --webpack` and `next build --turbopack` on
- * Next 16.3.5, so it is the only form `withAccessible` emits.
+ * Next 16.3.5 and 16.4.1, so it is the only form `withAccessible` emits.
  */
 const SWC_PLUGIN_SPECIFIER = '@accessible-so/monitor-next/swc';
 
 /**
- * The Next major `swc/plugin.wasm` is built for.
+ * The Next release line `swc/plugin.wasm` is built for: stable 16.4.x.
  *
  * An SWC plugin is a wasm module that exchanges a serialized AST with its
  * host, and the layout of that AST is fixed by the exact `swc_core` the two
- * sides were compiled against. Ours is built against `swc_core` 73
- * (`swc_common` 23.0.2, `swc_ecma_ast` 25.0.0, `swc_plugin_runner` 30.0.1),
- * which is what Next 16 links. Next 15 links `swc_core` 35 — nine majors of
- * AST layout away — and loading this wasm there does not degrade, it fails
- * the user's build.
+ * sides were compiled against. Ours is built against `swc_core` 79
+ * (`swc_common` 26, `swc_ecma_ast` 29, `swc_plugin_runner` 34), which is what
+ * Next 16.4.0–16.4.3 link. Next moves that AST between minors, not just
+ * majors — 16.3 links `swc_ecma_ast` 25, 16.2 links 20 — and loading this
+ * wasm on any of them does not degrade, it fails the user's build.
  *
- * So the version is checked before the plugin is registered at all. One wasm
- * cannot serve both majors; this package targets 16 and hands 15 the same
- * graceful path a missing wasm gets, because every other part of the adapter
- * works on 15 and only attribution does not.
+ * So the version is checked before the plugin is registered at all, and
+ * every other version gets the same graceful path a missing wasm gets: every
+ * other part of the adapter works there and only attribution does not.
+ * Prereleases are refused too, since a 16.4 canary can predate the bump.
  */
-const SUPPORTED_NEXT_MAJOR = 16;
+const SUPPORTED_NEXT = '16.4';
+const SUPPORTED_NEXT_VERSION = /^\s*16\.4\.\d+\s*$/;
 
 /**
  * The version of `next` the host project will build with.
@@ -70,12 +71,6 @@ function hostNextVersion(): string | null {
   } catch {
     return null;
   }
-}
-
-/** The leading integer of a semver string — `16` from `16.3.5` and from `16.0.0-canary.3`. */
-function majorOf(version: string): number | null {
-  const major = /^\s*(\d+)\./.exec(version);
-  return major ? Number(major[1]) : null;
 }
 
 /**
@@ -132,10 +127,9 @@ export function withAccessible(
   // Checked second, so a machine with no wasm at all reports that rather than
   // its Next version — the missing artefact is the more actionable of the two.
   const version = (options.nextVersion ?? hostNextVersion)();
-  const major = version === null ? null : majorOf(version);
-  if (major !== SUPPORTED_NEXT_MAJOR) {
+  if (version === null || !SUPPORTED_NEXT_VERSION.test(version)) {
     console.warn(
-      `[accessible] component attribution needs Next ${SUPPORTED_NEXT_MAJOR} ` +
+      `[accessible] component attribution needs Next ${SUPPORTED_NEXT}.x ` +
         `(found ${version ?? 'no resolvable next'}); building without it`,
     );
     return nextConfig;

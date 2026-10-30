@@ -1,6 +1,6 @@
 {
   "name": "@accessible-so/monitor-next",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Next.js App Router adapter for Accessible RUM: route-pattern attribution from concrete paths.",
   "license": "MIT",
   "author": "Accessible <support@accessible.so>",

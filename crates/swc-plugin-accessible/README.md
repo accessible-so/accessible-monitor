@@ -138,12 +138,12 @@ rustup target add wasm32-wasip1
 linker: the plugin reaches its host through plain `extern "C"` declarations,
 which resolve to imports only at instantiation time.
 
-The crate tracks `swc_core` **73**, which is the range Next 16 links
-(`swc_common` 23.0.2, `swc_ecma_ast` 25.0.0, `swc_plugin_runner` 30.0.1). A
-plugin and its host exchange a serialized AST whose layout those versions
-fix, so the wasm only loads in a host built against the same window — 70.0.0
-through 73.0.0; 74 moves to `swc_common` 24 and breaks it. `withAccessible`
-refuses to register the plugin outside Next 16 for exactly this reason.
+The crate tracks `swc_core` **79**, which is what Next 16.4 links
+(`swc_common` 26, `swc_ecma_ast` 29, `swc_plugin_runner` 34). A plugin and its
+host exchange a serialized AST whose layout those versions fix, so the wasm
+only loads in a host built against the same `swc_ecma_ast` major — and Next
+changes it between minors (16.3 links 25). `withAccessible` refuses to
+register the plugin outside stable Next 16.4.x for exactly this reason.
 
 ## Tests
 

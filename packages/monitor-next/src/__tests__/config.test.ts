@@ -3,8 +3,8 @@ import { withAccessible } from '../config';
 
 const present = () => true;
 const missing = () => false;
-/** The Next major the shipped wasm is built against; see SUPPORTED_NEXT_MAJOR. */
-const supported = () => '16.3.5';
+/** A Next the shipped wasm is built against; see SUPPORTED_NEXT. */
+const supported = () => '16.4.1';
 
 /** Every case that expects registration needs both gates open. */
 const ok = { pluginExists: present, nextVersion: supported };
@@ -54,21 +54,21 @@ describe('withAccessible', () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
-  it('refuses to register the plugin on a Next major it was not built for', () => {
+  it.each(['15.5.9', '16.3.5', '17.0.0'])('refuses to register the plugin on Next %s, which it was not built for', (version) => {
     // The wasm exchanges a serialized AST with its host, and that layout is
-    // fixed by the swc_core both sides were built against. Next 15 links
-    // swc_core 35 against our 73: loading it there does not degrade, it fails
+    // fixed by the swc_core both sides were built against. Next 16.3 links
+    // swc_ecma_ast 25 against our 29: loading it there does not degrade, it fails
     // the user's build. `pluginExists` answers yes here precisely so that the
     // version is the only thing that can stop it.
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const base = { reactStrictMode: true };
 
-    const cfg = withAccessible(base, { pluginExists: present, nextVersion: () => '15.5.9' });
+    const cfg = withAccessible(base, { pluginExists: present, nextVersion: () => version });
 
     expect(cfg).toBe(base);
     expect((cfg as any).experimental).toBeUndefined();
     expect(warn).toHaveBeenCalledTimes(1);
-    expect(warn.mock.calls[0]![0]).toContain('15.5.9');
+    expect(warn.mock.calls[0]![0]).toContain(version);
   });
 
   it('skips attribution rather than guessing when no next resolves', () => {
@@ -81,9 +81,16 @@ describe('withAccessible', () => {
     expect(warn.mock.calls[0]![0]).toContain('no resolvable next');
   });
 
-  it('accepts a prerelease of the supported major', () => {
-    const cfg = withAccessible({}, { pluginExists: present, nextVersion: () => '16.0.0-canary.3' }) as any;
+  it('accepts every stable 16.4 patch', () => {
+    const cfg = withAccessible({}, { pluginExists: present, nextVersion: () => '16.4.3' }) as any;
     expect(cfg.experimental.swcPlugins).toEqual([['@accessible-so/monitor-next/swc', {}]]);
+  });
+
+  it('refuses a 16.4 canary, which can predate the swc bump', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const base = {};
+    expect(withAccessible(base, { pluginExists: present, nextVersion: () => '16.4.0-canary.3' })).toBe(base);
+    expect(warn).toHaveBeenCalledTimes(1);
   });
 
   it('reports a missing wasm ahead of an unsupported Next, as the more actionable of the two', () => {

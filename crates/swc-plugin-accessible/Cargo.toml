@@ -13,11 +13,12 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-swc_core = { version = "73", features = ["ecma_plugin_transform", "ecma_ast", "ecma_visit", "common"] }
+swc_core = { version = "79", features = ["ecma_plugin_transform", "ecma_ast", "ecma_visit", "common"] }
 
 [dev-dependencies]
-swc_core = { version = "73", features = ["swc_ecma_transforms_testing", "testing", "ecma_parser", "ecma_codegen"] }
-testing = "*"
+swc_core = { version = "79", features = ["swc_ecma_transforms_testing", "testing", "ecma_parser", "ecma_codegen"] }
+# Pinned to the major whose swc_common matches swc_core's (27 -> 26); `*` drifts.
+testing = "27"
 
 # The wasm ships inside the npm package and is read at every Next.js build, so
 # it is tuned for size rather than speed: the transform itself is trivial, and
