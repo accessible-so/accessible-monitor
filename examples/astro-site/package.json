@@ -11,6 +11,6 @@
   },
   "dependencies": {
     "@accessible-so/monitor-astro": "workspace:*",
-    "astro": "7.3.6"
+    "astro": "7.4.7"
   }
 }
